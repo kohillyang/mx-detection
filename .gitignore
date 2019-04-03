@@ -1,0 +1,10 @@
+*.pyc
+*.so
+
+\.idea
+
+output
+
+pretrained/
+
+*.o
