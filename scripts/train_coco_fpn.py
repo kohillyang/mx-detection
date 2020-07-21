@@ -228,7 +228,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
     net_with_criterion = RCNNWithCriterion(base_net=net)
     net_parallel = DataParallelModel(net_with_criterion, ctx_list=ctx,
-                                     sync=True if config.network.IM_PER_GPU is 1 else False)
+                                     sync=False if config.network.IM_PER_GPU is 1 else False)
 
     for epoch in range(begin_epoch, config.TRAIN.end_epoch):
         eval_metrics.reset()
