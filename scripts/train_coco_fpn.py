@@ -15,7 +15,7 @@ from models.fpn.fpn_dcn import PyramidRFCN
 from models.fpn.resnetv1b import ResNetV1
 from utils.common import log_init
 from utils.config import config, update_config
-from utils.dataloader import DataLoader
+# from utils.dataloader import DataLoader
 from utils.im_detect import im_detect_bbox_aug
 from utils.lrsheduler import WarmupMultiFactorScheduler
 from utils.parallel import DataParallelModel
@@ -170,7 +170,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
         bbox_t.Normalize(),
     ])
     from data.bbox.mscoco import COCODetection
-    val_dataset = COCODetection(root=config.dataset.dataset_path., splits=("instances_val2017",), h_flip=False)
+    val_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",), h_flip=False)
     train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                   h_flip=config.TRAIN.FLIP,
                                   transform=train_transforms)
@@ -243,15 +243,15 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 outputs = net_parallel(*inputs)
             for output in outputs:
                 loss_rpn_cls, loss_rpn_loc, loss_rcnn_cls, loss_rcnn_loc, rpn_label, rpn_cls_score = output
-                if nbatch % 4 == 0:
-                    rpn_eval_metric.update(rpn_label, rpn_cls_score)
-                    loss_rpn_cls_metric.update(None, loss_rpn_cls)
-                    loss_rpn_loc_metric.update(None, loss_rpn_loc)
-                    loss_rcnn_cls_metric.update(None, loss_rcnn_cls)
-                    loss_rcnn_loc_metric.update(None, loss_rcnn_loc)
                 losses.extend([loss_rpn_cls, loss_rpn_loc, loss_rcnn_cls, loss_rcnn_loc])
+            rpn_eval_metric.update(rpn_label, rpn_cls_score)
+            loss_rpn_cls_metric.update(None, loss_rpn_cls)
+            loss_rpn_loc_metric.update(None, loss_rpn_loc)
+            loss_rcnn_cls_metric.update(None, loss_rcnn_cls)
+            loss_rcnn_loc_metric.update(None, loss_rcnn_loc)
             ag.backward(losses)
             trainer.step(len(ctx), ignore_stale_grad=True)
+            mx.nd.waitall()
             if nbatch % 100 == 0:
                 msg = ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 msg += ",lr={}".format(trainer.learning_rate)
@@ -293,11 +293,12 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
 def main():
     update_config("configs/coco/resnet_v1_101_coco_trainval_fpn_dcn_end2end_ohem.yaml")
+    os.makedirs(config.TRAIN.model_prefix, exist_ok=True)
     log_init(filename=config.TRAIN.model_prefix + "train.log")
     msg = pprint.pformat(config)
     logging.info(msg)
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     ctx = ctx * config.network.IM_PER_GPU
