@@ -15,6 +15,7 @@ default:
 network:
   IM_PER_GPU: 1
   SYNC_BN: True # This is only supported by resnetv1b.
+  USE_RFP: True
   pretrained: "./model/pretrained_model/resnet_v1_101"
   pretrained_epoch: 0
   PIXEL_MEANS:
@@ -61,7 +62,7 @@ network:
 dataset:
   NUM_CLASSES: 81
   dataset: coco
-  dataset_path: "/data1/coco/"
+  dataset_path: "/media/kohill/data/coco/"
   proposal: rpn
 TRAIN:
   lr: 0.0025

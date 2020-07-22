@@ -12,7 +12,7 @@ import numpy as np
 import tqdm
 from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
 from models.fpn.fpn_dcn import PyramidRFCN
-from models.fpn.resnetv1b import ResNetV1
+from models.fpn.resnetv1b import ResNetV1, RFPResNetV1
 from utils.common import log_init
 from utils.config import config, update_config
 # from utils.dataloader import DataLoader
@@ -125,7 +125,10 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     np.random.seed(3)
 
     batch_size = len(ctx)
-    backbone = ResNetV1(num_devices=len(set(ctx)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
+    if config.network.USE_RFP:
+        backbone = RFPResNetV1(num_devices=len(set(ctx)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
+    else:
+        backbone = ResNetV1(num_devices=len(set(ctx)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
     feat_symbol = backbone(mx.sym.var(name="data"))
     net = PyramidRFCN(config, backbone)
 
@@ -218,8 +221,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     trainer = mx.gluon.Trainer(
         params_to_train,  # fix batchnorm, fix first stage, etc...
         'sgd',
-        {'learning_rate': config.TRAIN.lr,
-         'wd': config.TRAIN.wd,
+        {'wd': config.TRAIN.wd,
          'momentum': config.TRAIN.momentum,
          'clip_gradient': None,
          'lr_scheduler': lr_scheduler
@@ -298,7 +300,7 @@ def main():
     msg = pprint.pformat(config)
     logging.info(msg)
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     ctx = ctx * config.network.IM_PER_GPU

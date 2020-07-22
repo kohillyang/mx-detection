@@ -43,6 +43,7 @@ config.network.ANCHOR_SCALES = (8, 16, 32)
 config.network.ANCHOR_RATIOS = (0.5, 1, 2)
 config.network.NUM_ANCHORS = len(config.network.ANCHOR_SCALES) * len(config.network.ANCHOR_RATIOS)
 config.network.SYNC_BN = False
+config.network.USE_RFP = False
 config.network.IM_PER_GPU = 1
 
 # dataset related params
