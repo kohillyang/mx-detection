@@ -8,3 +8,5 @@ output
 pretrained/
 
 *.o
+
+utils/operator_cxx/FCOSTargetGenerator/build/

@@ -173,6 +173,11 @@ config.TEST.test_epoch = 0
 
 config.TEST.USE_SOFTNMS = False
 
+config.FCOS = edict()
+config.FCOS.network = edict()
+config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
+config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
+config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 1e99]
 
 def update_config(config_file):
     exp_config = None

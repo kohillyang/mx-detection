@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import mxnet.ndarray as nd
 import mxnet as mx
+import mobula
 
 def rotate_nobound(image, kp, angle, center=None, scale=1.):
     (h, w) = image.shape[:2]
@@ -147,10 +148,13 @@ class Resize(object):
         if np.round(im_scale * im_size_max) > self.max_size:
             im_scale = float(self.max_size) / float(im_size_max)
         im = cv2.resize(image, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_CUBIC)
+        pad = lambda x: x if x % 64 == 0 else x + 64 - x % 64
+        im_padded = np.zeros(shape=(pad(im.shape[0]), pad(im.shape[1]), im.shape[2]), dtype=np.float32)
+        im_padded[:im.shape[0], :im.shape[1], :] = im
         if bbox is not None and len(bbox) > 1:
             bbox = bbox.astype('f')
             bbox[:, :4] *= im_scale
-        return im, bbox
+        return im_padded, bbox
 
 
 class RandomResize(object):
@@ -323,6 +327,30 @@ class AssignPyramidAnchor(object):
         bbox_target = nd.array(label_dict["bbox_target"])
         bbox_weight = nd.array(label_dict["bbox_weight"])
         return data, im_info, gt_boxes, label, bbox_target, bbox_weight
+
+
+class FCOSTargetGenerator(object):
+    def __init__(self, config):
+        super(FCOSTargetGenerator, self).__init__()
+        self.config = config
+        self.strides = config.FCOS.network.FPN_SCALES
+        self.fpn_min_distance = config.FCOS.network.FPN_MINIMUM_DISTANCES
+        self.fpn_max_distance = config.FCOS.network.FPN_MAXIMUM_DISTANCES
+        self.number_of_classes = config.dataset.NUM_CLASSES
+
+    def __call__(self, image_transposed, bboxes):
+        h, w, c = image_transposed.shape
+        for s in self.strides:
+            assert h % s == 0
+            assert w % s == 0
+        outputs = [image_transposed]
+        for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
+            target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
+                image_transposed.astype(np.float32), bboxes.astype(np.float32))
+            target = target.transpose((2, 0, 1))
+            target = target[np.newaxis]
+            outputs.append(target)
+        return outputs
 
 
 class Compose(object):

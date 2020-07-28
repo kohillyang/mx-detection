@@ -62,7 +62,7 @@ network:
 dataset:
   NUM_CLASSES: 81
   dataset: coco
-  dataset_path: "/media/kohill/data/coco/"
+  dataset_path: "/data1/coco/"
   proposal: rpn
 TRAIN:
   lr: 0.0025
