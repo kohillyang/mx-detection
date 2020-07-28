@@ -69,7 +69,8 @@ class ResNetV1(mx.gluon.nn.HybridBlock):
         self.neck = PyramidNeck(feature_dim=feature_dim)
 
     def hybrid_forward(self, F, x, mean, std=None):
-        x = x / 255.0
+        input = F.transpose(x, (0, 3, 1, 2))
+        x = input / 255.0
         x = F.broadcast_sub(x, mean)
         x = F.broadcast_div(x, std)
         x = self.feat.conv1(x)

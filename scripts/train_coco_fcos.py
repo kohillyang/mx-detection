@@ -71,7 +71,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
             # one extra channel for center-ness, four channel for location regression.
             # number of classes here includes one channel for the background.
-            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes-1+1+4, kernel_size=3, padding=1))
+            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes+1+4, kernel_size=3, padding=1))
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         return self.feat(x)
@@ -94,7 +94,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     np.random.seed(3)
 
     batch_size = len(ctx)
-    if config.network.USE_RFP:
+    if config.network.USE_RFP and False:
         backbone = RFPResNetV1(num_devices=len(set(ctx)), num_layers=50, sync_bn=config.network.SYNC_BN,
                                pretrained=True)
     else:
@@ -213,11 +213,11 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         centerness_prediction = fpn_prediction[:, 4:5]
                         class_prediction = fpn_prediction[:, 5:].log_softmax(axis=1)
 
-                        # Todo: L2 loss -> IoU loss
-                        loss_loc = L2Loss(loc_prediction, loc_target) * mask / (mx.nd.sum(mask) + 1e-1)
-
+                        # Todo: L1 loss -> IoU loss
+                        loss_loc = mx.nd.smooth_l1(loc_prediction-loc_target, scalar=1.0) * mask / (mx.nd.sum(mask) + 1e-1)
+                        loss_loc = loss_loc / 100
                         # Todo: CrossEntropy Loss-> Focal Loss
-                        loss_cls = -1 * mx.nd.pick(class_prediction, index=class_target, axis=1) * mask / (mx.nd.sum(mask) + 1e-1)
+                        loss_cls = -1 * mx.nd.pick(class_prediction, index=class_target, axis=1)  / (mx.nd.sum(mask) + 1e-1)
 
                         # BCE loss
                         loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1e-1)
@@ -230,9 +230,10 @@ def train_net(ctx, begin_epoch, lr, lr_step):
             metric_loss_loc.update(None, loss_loc.sum())
             metric_loss_center.update(None, loss_centerness.sum())
             metric_loss_cls.update(None, loss_cls.sum())
-            if trainer.optimizer.num_update % 100 == 0:
+            if trainer.optimizer.num_update % 10 == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
+                logging.info(msg)
                 eval_metrics.reset()
         save_path = "{}-{}.params".format(config.TRAIN.model_prefix, epoch)
         net.collect_params().save(save_path)

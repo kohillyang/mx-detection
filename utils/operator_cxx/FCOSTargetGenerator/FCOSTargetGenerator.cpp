@@ -56,7 +56,7 @@ const T* bboxes, const int number_of_bboxes, T distance_min, T distance_max, T* 
                             center_ness /= std::max(delta_r, delta_l) * std::max(delta_t, delta_b) + 1e-1;
                             center_ness = std::sqrt(center_ness);
                             output_base[5] = center_ness;
-                            output_base[6] = class_id - 1; // class_id begins with 1, so minus 1 here.
+                            output_base[6] = class_id;
                         }
                     }
                 }
