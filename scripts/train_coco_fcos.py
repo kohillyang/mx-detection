@@ -23,6 +23,41 @@ import mobula
 mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
 
+@mobula.op.register
+class BCELoss:
+    def forward(self, y, target):
+        return mx.nd.log(1 + mx.nd.exp(y)) - target * y
+
+    def backward(self, dy):
+        grad = mx.nd.sigmoid(self.X[0]) - self.X[1]
+        # grad *= 1e-4
+        self.dX[0][:] = grad * dy
+
+    def infer_shape(self, in_shape):
+        try:
+            assert in_shape[0] == in_shape[1]
+        except AssertionError as e:
+            print(in_shape)
+            raise e
+        return in_shape, [in_shape[0]]
+
+
+@mobula.op.register
+class L2Loss:
+    def forward(self, y, target):
+        # return 2 * mx.nd.log(1 + mx.nd.exp(y)) - y - target * y
+        return (y - target) ** 2
+
+    def backward(self, dy):
+        # grad = mx.nd.sigmoid(self.X[0])*2 - 1 - self.X[1]
+        grad = 2 * (self.X[0] - self.X[1])
+        # grad *= 1e-4
+        self.dX[0][:] = grad * dy
+
+    def infer_shape(self, in_shape):
+        assert in_shape[0] == in_shape[1]
+        return in_shape, [in_shape[0]]
+
 def batch_fn(x):
     return x
 
@@ -35,7 +70,8 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             for i in range(4):
                 self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
             # one extra channel for center-ness, four channel for location regression.
-            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes+1+4, kernel_size=3, padding=1))
+            # number of classes here includes one channel for the background.
+            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes-1+1+4, kernel_size=3, padding=1))
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         return self.feat(x)
@@ -147,7 +183,13 @@ def train_net(ctx, begin_epoch, lr, lr_step):
          'clip_gradient': None,
          'lr_scheduler': lr_scheduler
          })
-    val_metric_5 = VOC07MApMetric(iou_thresh=.5)
+
+    metric_loss_loc = mx.metric.Loss(name="loss_loc")
+    metric_loss_cls = mx.metric.Loss(name="loss_cls")
+    metric_loss_center = mx.metric.Loss(name="loss_center")
+    eval_metrics = mx.metric.CompositeEvalMetric()
+    for child_metric in [metric_loss_loc, metric_loss_cls, metric_loss_center]:
+        eval_metrics.add(child_metric)
 
     for epoch in range(begin_epoch, config.TRAIN.end_epoch):
 
@@ -165,13 +207,39 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         mask = fpn_label[:, 0:1]
                         loc_target = fpn_label[:, 1:5]
                         centerness_target = fpn_label[:, 5:6]
-                        class_target = fpn_label[:, 6:]
+                        class_target = fpn_label[:, 6:7]
 
                         loc_prediction = fpn_prediction[:, :4].exp()
                         centerness_prediction = fpn_prediction[:, 4:5]
-                        class_prediction = fpn_prediction[:, 5:]
+                        class_prediction = fpn_prediction[:, 5:].log_softmax(axis=1)
 
-                        
+                        # Todo: L2 loss -> IoU loss
+                        loss_loc = L2Loss(loc_prediction, loc_target) * mask / (mx.nd.sum(mask) + 1e-1)
+
+                        # Todo: CrossEntropy Loss-> Focal Loss
+                        loss_cls = -1 * mx.nd.pick(class_prediction, index=class_target, axis=1) * mask / (mx.nd.sum(mask) + 1e-1)
+
+                        # BCE loss
+                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1e-1)
+
+                        losses.append(loss_loc)
+                        losses.append(loss_cls)
+                        losses.append(loss_centerness)
+            ag.backward(losses)
+            trainer.step(batch_size)
+            metric_loss_loc.update(None, loss_loc.sum())
+            metric_loss_center.update(None, loss_centerness.sum())
+            metric_loss_cls.update(None, loss_cls.sum())
+            if trainer.optimizer.num_update % 100 == 0:
+                msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
+                msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
+                eval_metrics.reset()
+        save_path = "{}-{}.params".format(config.TRAIN.model_prefix, epoch)
+        net.collect_params().save(save_path)
+        logging.info("Saved checkpoint to {}".format(save_path))
+        trainer_path = save_path + "-trainer.states"
+        trainer.save_states(trainer_path)
+
 def main():
     update_config("configs/coco/resnet_v1_101_coco_trainval_fpn_dcn_end2end_ohem.yaml")
     os.makedirs(config.TRAIN.model_prefix, exist_ok=True)
