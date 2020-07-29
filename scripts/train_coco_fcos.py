@@ -10,13 +10,13 @@ import mxnet as mx
 import mxnet.autograd as ag
 import numpy as np
 import tqdm
-from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
+
+import matplotlib.pyplot as plt
 
 from models.fpn.resnetv1b import ResNetV1, RFPResNetV1
 from utils.common import log_init
 from utils.config import config, update_config
 from utils.lrsheduler import WarmupMultiFactorScheduler
-from utils.parallel import DataParallelModel
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 import mobula
@@ -57,6 +57,26 @@ class L2Loss:
     def infer_shape(self, in_shape):
         assert in_shape[0] == in_shape[1]
         return in_shape, [in_shape[0]]
+
+
+class IoULoss(mx.gluon.nn.Block):
+    def __init__(self):
+        super(IoULoss, self).__init__()
+
+    def forward(self, prediction, target):
+        assert prediction.shape[1] == 4
+        assert target.shape[1] == 4
+        target = mx.nd.maximum(target, mx.nd.ones_like(target))
+        l, t, r, b = 0, 1, 2, 3 # l, t, r, b
+        X = (target[:, t] + target[:, b]) * (target[:, l] + target[:, r])
+        X_hat = (prediction[:, t] + prediction[:, b]) * (prediction[:, l] + prediction[:, r])
+        I_h = mx.nd.minimum(target[:, t], prediction[:, t]) + mx.nd.minimum(target[:, b], prediction[:, b])
+        I_w = mx.nd.minimum(target[:, l], prediction[:, l]) + mx.nd.minimum(target[:, r], prediction[:, r])
+        I = I_h * I_w
+        U = X + X_hat - I
+        IoU = I / U
+        return -IoU.log()
+
 
 def batch_fn(x):
     return x
@@ -207,30 +227,43 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         mask = fpn_label[:, 0:1]
                         loc_target = fpn_label[:, 1:5]
                         centerness_target = fpn_label[:, 5:6]
-                        class_target = fpn_label[:, 6:7]
+                        class_target = fpn_label[:, 6:]
 
-                        loc_prediction = fpn_prediction[:, :4].exp()
+                        stride = image.shape[0] / class_target.shape[2]
+                        loc_prediction = (stride * fpn_prediction[:, :4]).exp()
                         centerness_prediction = fpn_prediction[:, 4:5]
                         class_prediction = fpn_prediction[:, 5:].log_softmax(axis=1)
 
-                        # Todo: L1 loss -> IoU loss
-                        loss_loc = mx.nd.smooth_l1(loc_prediction-loc_target, scalar=1.0) * mask / (mx.nd.sum(mask) + 1e-1)
-                        loss_loc = loss_loc / 100
-                        # Todo: CrossEntropy Loss-> Focal Loss
-                        loss_cls = -1 * mx.nd.pick(class_prediction, index=class_target, axis=1)  / (mx.nd.sum(mask) + 1e-1)
 
+                        loss_loc = mx.nd.smooth_l1(loc_prediction-loc_target, scalar=1.0) * mask / (mx.nd.sum(mask) + 1)
+                        loss_loc = loss_loc / 1e3
+                        # iou_loss = IoULoss()(loc_prediction, loc_target)[np.newaxis]
+                        # loss_loc = mx.nd.where(mask, iou_loss, mx.nd.zeros_like(mask)) / (mx.nd.sum(mask) + 1)
+
+                        # Todo: CrossEntropy Loss-> Focal Loss
+                        loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
                         # BCE loss
-                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1e-1)
+                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1)
 
                         losses.append(loss_loc)
                         losses.append(loss_cls)
                         losses.append(loss_centerness)
+                        #
+                        # import matplotlib.pyplot as plt
+                        # fig, axes = plt.subplots(1, 4)
+                        # axes = axes.reshape(-1)
+                        # axes[0].imshow(loc_target[0, 0].asnumpy())
+                        # axes[1].imshow(loc_target[0, 1].asnumpy())
+                        # axes[2].imshow(loc_target[0, 2].asnumpy())
+                        # axes[3].imshow(loc_target[0, 3].asnumpy())
+                        # plt.show()
+
             ag.backward(losses)
             trainer.step(batch_size)
             metric_loss_loc.update(None, loss_loc.sum())
             metric_loss_center.update(None, loss_centerness.sum())
             metric_loss_cls.update(None, loss_cls.sum())
-            if trainer.optimizer.num_update % 10 == 0:
+            if trainer.optimizer.num_update % 1 == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)

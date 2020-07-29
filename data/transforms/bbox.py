@@ -343,6 +343,8 @@ class FCOSTargetGenerator(object):
         for s in self.strides:
             assert h % s == 0
             assert w % s == 0
+        bboxes = bboxes.copy()
+        bboxes[:, 4] += 1
         outputs = [image_transposed]
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(

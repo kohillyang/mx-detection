@@ -24,7 +24,7 @@ class Config(with_metaclass(ConfigMeta)):
     USING_OPENMP = True
     USING_CBLAS = False
     HOST_NUM_THREADS = 0  # 0 : auto
-    USING_HIGH_LEVEL_WARNINGS = True
+    USING_HIGH_LEVEL_WARNINGS = False
     USING_OPTIMIZATION = True
     USING_ASYNC_EXEC = True
     GPU_BACKEND = 'cuda'

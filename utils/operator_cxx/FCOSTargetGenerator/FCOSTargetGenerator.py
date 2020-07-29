@@ -50,6 +50,6 @@ class FCOSTargetGenerator:
         # one channel for mask
         # 4 channel for bbox
         # one channel for centerness
-        # 1 channel for class id,
-        # 6 + 1 channels in total, if coco dataset is used.
-        return in_shape, [(h // stride, w // self.stride, 7)]
+        # No. of classes channels for class id,
+        # 6 + 81 channels in total, if coco dataset is used.
+        return in_shape, [(h // stride, w // self.stride, 6 + self.number_of_classes)]
