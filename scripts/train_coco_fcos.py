@@ -185,15 +185,13 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
-    base_lr = lr
-    lr_factor = config.TRAIN.lr_factor
-    lr_epoch = [float(epoch) for epoch in lr_step.split(',')]
-    lr_epoch_diff = [epoch - begin_epoch for epoch in lr_epoch if epoch > begin_epoch]
-    lr = base_lr * (lr_factor ** (len(lr_epoch) - len(lr_epoch_diff)))
-    lr_iters = [int(epoch * len(train_dataset) / batch_size) for epoch in lr_epoch_diff]
-    print('lr', lr, 'lr_epoch_diff', lr_epoch_diff, 'lr_iters', lr_iters)
-    lr_scheduler = WarmupMultiFactorScheduler(lr_iters, lr_factor, config.TRAIN.warmup, config.TRAIN.warmup_lr,
-                                              config.TRAIN.warmup_step)
+    lr_steps = [len(train_dataset) * int(x) for x in config.TRAIN.lr_step.split(',')]
+    logging.info(lr_steps)
+    lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
+                                                        warmup_mode="constant", factor=.1,
+                                                        base_lr=config.TRAIN.lr,
+                                                        warmup_steps=config.TRAIN.warmup_step,
+                                                        warmup_begin_lr=config.TRAIN.warmup_lr)
 
     trainer = mx.gluon.Trainer(
         params_to_train,  # fix batchnorm, fix first stage, etc...
@@ -218,6 +216,9 @@ def train_net(ctx, begin_epoch, lr, lr_step):
             data_batch_list = [[mx.nd.array(x).as_in_context(c) for x in d] for c, d in zip(ctx, data_batch)]
             net.collect_params().zero_grad()
             losses = []
+            losses_loc = []
+            losses_center_ness = []
+            losses_cls=[]
             with ag.record():
                 for data_and_label in data_batch_list:
                     image = data_and_label[0]
@@ -230,15 +231,14 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         class_target = fpn_label[:, 6:]
 
                         stride = image.shape[0] / class_target.shape[2]
-                        loc_prediction = (stride * fpn_prediction[:, :4]).exp()
+                        loc_prediction = (stride * fpn_prediction[:, :4])
+                        loc_prediction = mx.nd.clip(loc_prediction, -8, 8).exp()
                         centerness_prediction = fpn_prediction[:, 4:5]
                         class_prediction = fpn_prediction[:, 5:].log_softmax(axis=1)
 
-
-                        loss_loc = mx.nd.smooth_l1(loc_prediction-loc_target, scalar=1.0) * mask / (mx.nd.sum(mask) + 1)
-                        loss_loc = loss_loc / 1e3
-                        # iou_loss = IoULoss()(loc_prediction, loc_target)[np.newaxis]
-                        # loss_loc = mx.nd.where(mask, iou_loss, mx.nd.zeros_like(mask)) / (mx.nd.sum(mask) + 1)
+                        # loss_loc = mx.nd.smooth_l1(loc_prediction-loc_target, scalar=1.0) * mask / (mx.nd.sum(mask) + 1)
+                        iou_loss = IoULoss()(loc_prediction, loc_target)[np.newaxis]
+                        loss_loc = mx.nd.where(mask, iou_loss, mx.nd.zeros_like(mask)) / (mx.nd.sum(mask) + 1)
 
                         # Todo: CrossEntropy Loss-> Focal Loss
                         loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
@@ -248,6 +248,11 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         losses.append(loss_loc)
                         losses.append(loss_cls)
                         losses.append(loss_centerness)
+
+                        losses_loc.append(loss_loc)
+                        losses_center_ness.append(loss_centerness)
+                        losses_cls.append(loss_cls)
+
                         #
                         # import matplotlib.pyplot as plt
                         # fig, axes = plt.subplots(1, 4)
@@ -260,10 +265,13 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
             ag.backward(losses)
             trainer.step(batch_size)
-            metric_loss_loc.update(None, loss_loc.sum())
-            metric_loss_center.update(None, loss_centerness.sum())
-            metric_loss_cls.update(None, loss_cls.sum())
-            if trainer.optimizer.num_update % 1 == 0:
+            for l in losses_loc:
+                metric_loss_loc.update(None, l.sum())
+            for l in losses_center_ness:
+                metric_loss_center.update(None, l.sum())
+            for l in losses_cls:
+                metric_loss_cls.update(None, l.sum())
+            if trainer.optimizer.num_update % 50 == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
