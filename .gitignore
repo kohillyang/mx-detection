@@ -10,3 +10,7 @@ pretrained/
 *.o
 
 utils/operator_cxx/FCOSTargetGenerator/build/
+
+utils/operator_cxx/FCOSRegression/build/
+
+.vscode

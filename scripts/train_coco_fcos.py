@@ -19,8 +19,10 @@ from utils.config import config, update_config
 from utils.lrsheduler import WarmupMultiFactorScheduler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
+import data.transforms.bbox as bbox_t
 import mobula
 mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
 
 @mobula.op.register
@@ -148,7 +150,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 params[key].initialize(default_init=default_init)
 
     net.collect_params().reset_ctx(list(set(ctx)))
-    import data.transforms.bbox as bbox_t
+
     train_transforms = bbox_t.Compose([
         # Flipping is implemented in dataset.
         # bbox_t.RandomRotate(bound=True, min_angle=-15, max_angle=15),
@@ -293,8 +295,23 @@ def main():
 
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     ctx = ctx * config.network.IM_PER_GPU
-    train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
+    # train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
+    demo_net(ctx)
 
+
+def demo_net(ctx_list):
+    backbone = ResNetV1(num_devices=len(set(ctx_list)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
+    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
+    net.collect_params().load("output/fpn_coco-6.params")
+    net.collect_params().reset_ctx(ctx_list[0])
+    image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
+    image_padded, _ = bbox_t.Resize(target_size=800, max_size=1333)(image, None)
+    predictions = net(mx.nd.array(image_padded[np.newaxis], ctx=ctx_list[0]))
+    bboxes_pred_list = []
+    for pred in predictions:
+        stride = image_padded.shape[0] // pred.shape[2]
+        yy = mobula.op.FCOSRegression(stride=stride, prediction=(stride * pred).exp())
+        pass
 
 if __name__ == '__main__':
     cv2.setNumThreads(1)
