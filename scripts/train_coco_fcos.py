@@ -77,7 +77,7 @@ class IoULoss(mx.gluon.nn.Block):
         I_w = mx.nd.minimum(target[:, l], prediction[:, l]) + mx.nd.minimum(target[:, r], prediction[:, r])
         I = I_h * I_w
         U = X + X_hat - I
-        IoU = I / U
+        IoU = I / U + 1e-5
         return -IoU.log()
 
 
@@ -90,11 +90,11 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
         super(FCOS_Head, self).__init__()
         with self.name_scope():
             self.feat = mx.gluon.nn.HybridSequential()
-            for i in range(4):
-                self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
+            # for i in range(4):
+            #     self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
             # one extra channel for center-ness, four channel for location regression.
             # number of classes here includes one channel for the background.
-            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes+1+4, kernel_size=3, padding=1))
+            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes-1+1+4, kernel_size=3, padding=1))
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         return self.feat(x)
@@ -103,9 +103,8 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
 class FCOSFPNNet(mx.gluon.nn.HybridBlock):
     def __init__(self, backbone, num_classes):
         super(FCOSFPNNet, self).__init__()
-        with self.name_scope():
-            self.backbone = backbone
-            self.fcos_head = FCOS_Head(num_classes)
+        self.backbone = backbone
+        self.fcos_head = FCOS_Head(num_classes)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         # typically the strides are (4, 8, 16, 32, 64)
@@ -125,6 +124,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
+    # resume = "/data/kohill/mop/pretrained/cpm-res50-cropped-flipped_rotated-masked-no-biasbndecay-22-73.63702331152489-193.0866734241876.params"
     resume = None
     if resume is not None:
         params_coco = mx.nd.load(resume)
@@ -134,7 +134,8 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
         for k in params.keys():
             try:
-                params[k]._load_init(params_coco[k], ctx=mx.cpu())
+                params[k]._load_init(params_coco[k.replace('resnet0_', '')], ctx=mx.cpu())
+                print("success load {}".format(k))
             except Exception as e:
                 logging.exception(e)
 
@@ -188,7 +189,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
-    lr_steps = [len(train_dataset) * int(x) for x in config.TRAIN.lr_step.split(',')]
+    lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step.split(',')]
     logging.info(lr_steps)
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
                                                         warmup_mode="constant", factor=.1,
@@ -204,6 +205,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
          'clip_gradient': None,
          'lr_scheduler': lr_scheduler
          })
+
 
     metric_loss_loc = mx.metric.Loss(name="loss_loc")
     metric_loss_cls = mx.metric.Loss(name="loss_cls")
@@ -225,27 +227,33 @@ def train_net(ctx, begin_epoch, lr, lr_step):
             with ag.record():
                 for data_and_label in data_batch_list:
                     image = data_and_label[0]
-                    label = data_and_label[1:]
+                    bboxes = data_and_label[1]
+                    label = data_and_label[2:]
                     y_hat = net(image[np.newaxis])
                     for fpn_label, fpn_prediction in zip(label, y_hat):
                         mask = fpn_label[:, 0:1]
+
                         loc_target = fpn_label[:, 1:5]
                         centerness_target = fpn_label[:, 5:6]
                         class_target = fpn_label[:, 6:]
 
                         stride = image.shape[0] / class_target.shape[2]
                         loc_prediction = (stride * fpn_prediction[:, :4])
-                        loc_prediction = mx.nd.clip(loc_prediction, -8, 8).exp()
+                        loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
+                        # loc_prediction = loc_prediction.exp()
                         centerness_prediction = fpn_prediction[:, 4:5]
-                        class_prediction = fpn_prediction[:, 5:].log_softmax(axis=1)
+                        class_prediction = fpn_prediction[:, 5:]
 
-                        # loss_loc = mx.nd.smooth_l1(loc_prediction-loc_target, scalar=1.0) * mask / (mx.nd.sum(mask) + 1)
-                        iou_loss = IoULoss()(loc_prediction, loc_target)[np.newaxis]
-                        loss_loc = mx.nd.where(mask, iou_loss, mx.nd.zeros_like(mask)) / (mx.nd.sum(mask) + 1)
+                        # loss_loc = mx.nd.smooth_l1(loc_prediction-(1+loc_target).log(), scalar=1.0)
+                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask / (mx.nd.sum(mask) + 1)[np.newaxis]
+                        loss_loc = mx.nd.where(mask, iou_loss, mx.nd.zeros_like(mask))
 
                         # Todo: CrossEntropy Loss-> Focal Loss
-                        loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
+                        # loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
+                        loss_cls = BCELoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
                         # BCE loss
+                        # plt.imshow(class_target[0].max(axis=0).asnumpy())
+                        # plt.show()
                         loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1)
 
                         losses.append(loss_loc)
@@ -279,6 +287,19 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
                 eval_metrics.reset()
+
+                plt.imshow(image.asnumpy().astype(np.uint8))
+                plt.savefig("output/{}_image.jpg".format(trainer.optimizer.num_update))
+
+                plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy())
+                plt.savefig("output/{}_heatmap.jpg".format(trainer.optimizer.num_update))
+
+                plt.imshow(y_hat[0][0, 0].asnumpy())
+                plt.savefig("output/{}_bexp.jpg".format(trainer.optimizer.num_update))
+
+                plt.imshow(y_hat[0][0, 0].exp().asnumpy())
+                plt.savefig("output/{}_exp.jpg".format(trainer.optimizer.num_update))
+
         save_path = "{}-{}.params".format(config.TRAIN.model_prefix, epoch)
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
@@ -297,13 +318,13 @@ def main():
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     ctx = ctx * config.network.IM_PER_GPU
     train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
-    # demo_net(ctx)
+    # demo_net([mx.gpu(2)])
 
 
 def demo_net(ctx_list):
-    backbone = ResNetV1(num_devices=len(set(ctx_list)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
+    backbone = ResNet()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/fpn_coco-5.params")
+    net.collect_params().load("output/fpn_coco-2.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.Resize(target_size=800, max_size=1333)(image, None)
@@ -312,13 +333,16 @@ def demo_net(ctx_list):
     for pred in predictions:
         stride = image_padded.shape[0] // pred.shape[2]
         pred[:, :4] *= stride
+        plt.imshow(pred[0, 0].asnumpy())
+
         pred[:, :4] = (pred[:, :4]).exp()
         pred[:, 4] = pred[:, 5].sigmoid()
         pred[:, 5:] = pred[:, 5:].softmax(axis=1)
 
+        plt.show()
         pred_np = pred.asnumpy()
         rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)
-        rois = rois[np.where(rois[:, 4] > 0.000001)]
+        rois = rois[np.where(rois[:, 4] > 0.0)]
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
     # cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),

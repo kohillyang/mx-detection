@@ -2,21 +2,21 @@
  * author: kohill
  */
 #include "mobula_op.h"
+#include <algorithm>
 
 namespace mobula {
 
 #define UNUSED(expr) do { (void)(expr); } while (0)
 
 template <typename T>
-MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int feature_h, int feature_w,  int feature_ch, int stride, T* output) {
+MOBULA_FUNC void fcos_recall(const T *prediction, int feature_n, int feature_h, int feature_w,  int feature_ch,
+    int stride, int number_of_bboxes, T* gt_bboxes, T* output) {
     UNUSED(prediction);
     UNUSED(feature_h);
     UNUSED(feature_w);
     UNUSED(feature_ch);
     UNUSED(stride);
     UNUSED(output);
-    UNUSED(feature_n);
-
     const int ch_l=0, ch_t=1, ch_r=2, ch_b=3;
     int ch_center_ness = 4;
     // channel 5 is the probability of the background class.
@@ -38,20 +38,23 @@ MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int 
             T pred_y0 = ori_y - delta_t;
             T pred_x1 = ori_x + delta_r;
             T pred_y1 = ori_y + delta_b;
+            for(int nb=0; nb < number_of_bboxes; nb++){
+                T x0 = gt_bboxes[nb * 5 + 0];
+                T y0 = gt_bboxes[nb * 5 + 1];
+                T x1 = gt_bboxes[nb * 5 + 2];
+                T y1 = gt_bboxes[nb * 5 + 3];
+                // IoU
+                T iou_delta_x = sdt::min(pred_x1, pred_x1) - std::max(x0, pred_x0);
+                T iou_delta_y = sdt::min(pred_y1, pred_y1) - std::max(y0, pred_y0);
+                T area_intersect = 0;
+                if(iou_delta_x >= 0 && iou_delta_y >= 0){
+                    area_intersect = iou_delta_x * iou_delta_y;
+                }
+                T area_union = (x1 - x0) * (y1 - y0) + (pred_x1 - pred_x0) * (pred_y1 - pred_y0) - area_intersect;
+                T IoU = area_intersect / area_union;
+                if
+            }
 
-            for(int class_id=ch_cls_start; class_id<ch_cls_end; class_id++){
-                T centerness_score = *(prediction + ch_center_ness * feature_h * feature_w + f_h * feature_w + f_w);
-                T class_score = *(prediction + class_id * feature_h * feature_w + f_h * feature_w + f_w);
-                T score_used_for_ranking = centerness_score * class_score;
-                UNUSED(score_used_for_ranking);
-                output[n_bbox*6 + 0] = pred_x0;             
-                output[n_bbox*6 + 1] = pred_y0;             
-                output[n_bbox*6 + 2] = pred_x1;             
-                output[n_bbox*6 + 3] = pred_y1;             
-                output[n_bbox*6 + 4] = class_score;    
-                output[n_bbox*6 + 5] = class_id - ch_cls_start;
-                n_bbox ++;      
-            } 
         }
     }
 

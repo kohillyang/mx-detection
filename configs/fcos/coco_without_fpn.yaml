@@ -2,7 +2,7 @@
 MXNET_VERSION: "mxnet"
 output_path: "./output/fpn/coco"
 symbol: resnet_v1_101_fpn_dcn_rcnn
-gpus: '1,2'
+gpus: '2,3'
 CLASS_AGNOSTIC: false
 SCALES:
 - 800
@@ -62,12 +62,13 @@ network:
 dataset:
   NUM_CLASSES: 81
   dataset: coco
-  dataset_path: "/home/kk/xinsika/media/data4T1/coco"
+#  dataset_path: "/home/kk/xinsika/media/data4T1/coco"
+  dataset_path: "/data/coco"
   proposal: rpn
 TRAIN:
   lr: 0.0001
-  warmup_lr: 0.000025
-  warmup_step: 1000
+  warmup_lr: 0.0001
+  warmup_step: 50
   warmup: true
   # lr: 0.000001
   lr_step: '4,6'

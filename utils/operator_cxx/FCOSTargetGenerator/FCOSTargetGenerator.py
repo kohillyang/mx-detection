@@ -52,4 +52,4 @@ class FCOSTargetGenerator:
         # one channel for centerness
         # No. of classes channels for class id,
         # 6 + 81 channels in total, if coco dataset is used.
-        return in_shape, [(h // stride, w // self.stride, 6 + self.number_of_classes)]
+        return in_shape, [(h // stride, w // self.stride, 6 + self.number_of_classes - 1)]

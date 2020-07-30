@@ -8,7 +8,7 @@ class ResNet(mx.gluon.nn.HybridBlock):
     def __init__(self):
         super(ResNet, self).__init__()
         with self.name_scope():
-            self.feat = resnet50_v1b(dilated=True, pretrained=True)
+            self.feat = resnet50_v1b(dilated=True, pretrained=True, use_global_stats=True)
 
         self.mean = self.params.get('mean', shape=[1, 3, 1, 1],
                                     init=mx.init.Zero(),
