@@ -8,7 +8,7 @@ namespace mobula {
 #define UNUSED(expr) do { (void)(expr); } while (0)
 
 template <typename T>
-MOBULA_KERNEL fcos_target_regression_kernel(const T *prediction, int feature_h, int feature_w,  int feature_ch, int stride, T* output) {
+MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int feature_h, int feature_w,  int feature_ch, int stride, T* output) {
     UNUSED(prediction);
     UNUSED(feature_h);
     UNUSED(feature_w);
@@ -22,6 +22,8 @@ MOBULA_KERNEL fcos_target_regression_kernel(const T *prediction, int feature_h, 
     int ch_cls_end = feature_ch;
 
     int n_bbox = 0;
+
+    
     for(int f_w=0; f_w < feature_w; f_w++){
         for(int f_h=0; f_h < feature_h; f_h ++){
             T ori_x = f_w * stride + static_cast<T>(stride) / 2;
@@ -39,13 +41,14 @@ MOBULA_KERNEL fcos_target_regression_kernel(const T *prediction, int feature_h, 
                 T centerness_score = *(prediction + ch_center_ness * feature_h * feature_w + f_h * feature_w + f_w);
                 T class_score = *(prediction + class_id * feature_h * feature_w + f_h * feature_w + f_w);
                 T score_used_for_ranking = centerness_score * class_score;
-                output[n_bbox*5 + 0] = pred_x0;             
-                output[n_bbox*5 + 1] = pred_y0;             
-                output[n_bbox*5 + 2] = pred_x1;             
-                output[n_bbox*5 + 3] = pred_y1;             
-                output[n_bbox*5 + 4] = score_used_for_ranking;       
+                output[n_bbox*6 + 0] = pred_x0;             
+                output[n_bbox*6 + 1] = pred_y0;             
+                output[n_bbox*6 + 2] = pred_x1;             
+                output[n_bbox*6 + 3] = pred_y1;             
+                output[n_bbox*6 + 4] = class_score;    
+                output[n_bbox*6 + 5] = class_id - ch_cls_start;
                 n_bbox ++;      
-            }
+            } 
         }
     }
 

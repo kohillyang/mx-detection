@@ -19,9 +19,15 @@ def test_examples():
     examples = [
         ([], ['MyFirstOP.py', '../docs/tutorial/test_mul_func.py',
               '../docs/tutorial/test_mul_op.py']),
-        (['mxnet'], ['ConstantOP.py', 'RunROIAlign.py',
-                     'dynamic_import_op/dynamic_import_op.py']),
-        (['mxnet', 'tvm'], ['TVMOp.py']),
+        (['mxnet'], ['RunROIAlign.py',
+                     'dynamic_import_op/dynamic_import_op.py',
+                     '../opzoo/Convolution/test_conv.py',
+                     # '../opzoo/Softmax/test_softmax.py',
+                     '../opzoo/ROIAlign/test_roialign.py',
+                     '../opzoo/Sum/test_sum.py',
+                     '../opzoo/Transpose/test_transpose.py',
+                     ]),
+        (['mxnet', 'tvm', 'topi'], ['TVMOp.py']),
     ]
     sys.path.append('./')
     record = []

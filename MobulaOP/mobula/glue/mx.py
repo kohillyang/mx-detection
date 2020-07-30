@@ -10,6 +10,8 @@ if not hasattr(mx.nd.NDArray, 'empty_like'):
 if not hasattr(mx.nd.NDArray, 'wait_to_write'):
     mx.nd.NDArray.wait_to_write = lambda self: _LIB.MXNDArrayWaitToWrite(
         self.handle)
+if not hasattr(mx.symbol.Symbol, 'simple_bind'):
+    mx.symbol.Symbol.simple_bind = mx.symbol.Symbol._simple_bind
 
 
 def get_pointer(v):
@@ -39,9 +41,8 @@ try:
                    _LIB.MXNDArrayGetContext, _LIB.MXNDArrayToDLPack,
                    _LIB.MXEnginePushSyncND]
 except AttributeError as e:
-    warnings.warn("""Using asynchronous execution for MXNet failed, since {}
-It will drop the performance.
-Recommend using the latest version of MXNet""".format(e))
+    warnings.warn("""Fail to enable asynchronous execution for MXNet, since the version of MXNet is old. It will drop the performance.
+In order to improve the performance, please install MXNet whose version >= 1.6.0b20190809""")
     MX_LIB_APIS = None
 
 

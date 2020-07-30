@@ -21,6 +21,7 @@ from utils.lrsheduler import WarmupMultiFactorScheduler
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 import data.transforms.bbox as bbox_t
 import mobula
+setattr(mobula.config, "NVCC", "/usr/local/cuda-10.0/bin/nvcc")
 mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
@@ -295,14 +296,14 @@ def main():
 
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     ctx = ctx * config.network.IM_PER_GPU
-    # train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
-    demo_net(ctx)
+    train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
+    # demo_net(ctx)
 
 
 def demo_net(ctx_list):
     backbone = ResNetV1(num_devices=len(set(ctx_list)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/fpn_coco-6.params")
+    net.collect_params().load("output/fpn_coco-5.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.Resize(target_size=800, max_size=1333)(image, None)
@@ -310,8 +311,27 @@ def demo_net(ctx_list):
     bboxes_pred_list = []
     for pred in predictions:
         stride = image_padded.shape[0] // pred.shape[2]
-        yy = mobula.op.FCOSRegression(stride=stride, prediction=(stride * pred).exp())
-        pass
+        pred[:, :4] *= stride
+        pred[:, :4] = (pred[:, :4]).exp()
+        pred[:, 4] = pred[:, 5].sigmoid()
+        pred[:, 5:] = pred[:, 5:].softmax(axis=1)
+
+        pred_np = pred.asnumpy()
+        rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)
+        rois = rois[np.where(rois[:, 4] > 0.000001)]
+        bboxes_pred_list.append(rois)
+    bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
+    # cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
+    #                               overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
+    #                               force_suppress=True, in_format='corner',
+    #                               out_format='corner').asnumpy()
+    # cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
+    cls_dets = bboxes_pred
+    import gluoncv
+    gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
+                                thresh=0)
+    plt.show()
+    pass
 
 if __name__ == '__main__':
     cv2.setNumThreads(1)
