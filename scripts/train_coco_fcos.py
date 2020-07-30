@@ -13,7 +13,7 @@ import tqdm
 
 import matplotlib.pyplot as plt
 
-from models.fpn.resnetv1b import ResNetV1, RFPResNetV1
+from models.fcos.resnet import ResNet
 from utils.common import log_init
 from utils.config import config, update_config
 from utils.lrsheduler import WarmupMultiFactorScheduler
@@ -101,15 +101,19 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
 
 
 class FCOSFPNNet(mx.gluon.nn.HybridBlock):
-    def __init__(self, fpn_backbone, num_classes):
+    def __init__(self, backbone, num_classes):
         super(FCOSFPNNet, self).__init__()
         with self.name_scope():
-            self.fpn_backbone = fpn_backbone
+            self.backbone = backbone
             self.fcos_head = FCOS_Head(num_classes)
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         # typically the strides are (4, 8, 16, 32, 64)
-        return [self.fcos_head(xx) for xx in self.fpn_backbone(x)]
+        return [self.fcos_head(self.backbone(x))]
+        # if isinstance(x, list):
+        #     return [self.fcos_head(xx) for xx in self.fpn_backbone(x)]
+        # else:
+        #     return [self.fcos_head(x)]
 
 
 def train_net(ctx, begin_epoch, lr, lr_step):
@@ -117,11 +121,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     np.random.seed(3)
 
     batch_size = len(ctx)
-    if config.network.USE_RFP and False:
-        backbone = RFPResNetV1(num_devices=len(set(ctx)), num_layers=50, sync_bn=config.network.SYNC_BN,
-                               pretrained=True)
-    else:
-        backbone = ResNetV1(num_devices=len(set(ctx)), num_layers=50, sync_bn=config.network.SYNC_BN, pretrained=True)
+    backbone = ResNet()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -286,7 +286,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
         trainer.save_states(trainer_path)
 
 def main():
-    update_config("configs/coco/resnet_v1_101_coco_trainval_fpn_dcn_end2end_ohem.yaml")
+    update_config("configs/fcos/coco_without_fpn.yaml")
     os.makedirs(config.TRAIN.model_prefix, exist_ok=True)
     log_init(filename=config.TRAIN.model_prefix + "train.log")
     msg = pprint.pformat(config)
