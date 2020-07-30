@@ -14,6 +14,7 @@ import tqdm
 import matplotlib.pyplot as plt
 
 from models.fcos.resnet import ResNet
+from models.fcos.resnetv1b import FPNResNetV1
 from utils.common import log_init
 from utils.config import config, update_config
 from utils.lrsheduler import WarmupMultiFactorScheduler
@@ -90,8 +91,8 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
         super(FCOS_Head, self).__init__()
         with self.name_scope():
             self.feat = mx.gluon.nn.HybridSequential()
-            # for i in range(4):
-            #     self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
+            for i in range(4):
+                self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
             # one extra channel for center-ness, four channel for location regression.
             # number of classes here includes one channel for the background.
             self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes-1+1+4, kernel_size=3, padding=1))
@@ -108,11 +109,11 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
 
     def hybrid_forward(self, F, x, *args, **kwargs):
         # typically the strides are (4, 8, 16, 32, 64)
-        return [self.fcos_head(self.backbone(x))]
-        # if isinstance(x, list):
-        #     return [self.fcos_head(xx) for xx in self.fpn_backbone(x)]
-        # else:
-        #     return [self.fcos_head(x)]
+        x = self.backbone(x)
+        if isinstance(x, list) or isinstance(x, tuple):
+            return [self.fcos_head(xx) for xx in x]
+        else:
+            return [self.fcos_head(x)]
 
 
 def train_net(ctx, begin_epoch, lr, lr_step):
@@ -120,7 +121,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     np.random.seed(3)
 
     batch_size = len(ctx)
-    backbone = ResNet()
+    backbone = FPNResNetV1()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
