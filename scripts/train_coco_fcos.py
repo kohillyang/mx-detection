@@ -165,8 +165,8 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
-    config.TRAIN.lr = 1e-5
-    config.TRAIN.warmup_lr = 1e-6
+    config.TRAIN.lr = 1e-4
+    config.TRAIN.warmup_lr = 1e-5
     config.TRAIN.warmup_step = 1000
     batch_size = 4
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
