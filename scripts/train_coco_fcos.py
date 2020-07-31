@@ -127,15 +127,22 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
     def __init__(self, num_classes):
         super(FCOS_Head, self).__init__()
         with self.name_scope():
-            self.feat = mx.gluon.nn.HybridSequential()
+            self.feat_cls = mx.gluon.nn.HybridSequential()
             for i in range(4):
-                self.feat.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
+                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1, activation="relu"))
+
+            self.feat_reg = mx.gluon.nn.HybridSequential()
+            for i in range(4):
+                self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
             # one extra channel for center-ness, four channel for location regression.
-            # number of classes here includes one channel for the background.
-            self.feat.add(mx.gluon.nn.Conv2D(channels=num_classes-1+1+4, kernel_size=3, padding=1))
+            self.feat_reg.add(mx.gluon.nn.Conv2D(channels=1+4, kernel_size=3, padding=1))
 
     def hybrid_forward(self, F, x, *args, **kwargs):
-        return self.feat(x)
+        x1 = self.feat_reg(x)
+        x2 = self.feat_cls(x)
+        x = F.concat(x1, x2, dim=1)
+        return x
 
 
 class FCOSFPNNet(mx.gluon.nn.HybridBlock):
