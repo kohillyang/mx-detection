@@ -157,6 +157,22 @@ class Resize(object):
         return im_padded, bbox
 
 
+class ResizePad(object):
+    def __init__(self, dst_h=384, dst_w=384):
+        self.dst_h = dst_h
+        self.dst_w = dst_w
+
+    def __call__(self, image, bbox=None):
+        im_scale = min(1.0 * self.dst_h / image.shape[0], 1.0 * self.dst_w / image.shape[1])
+        im = cv2.resize(image, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_CUBIC)
+        im_padded = np.zeros(shape=(self.dst_h, self.dst_w, im.shape[2]), dtype=np.float32)
+        im_padded[:im.shape[0], :im.shape[1], :] = im
+        if bbox is not None and len(bbox) > 1:
+            bbox = bbox.astype('f')
+            bbox[:, :4] *= im_scale
+        return im_padded, bbox
+
+
 class RandomResize(object):
     def __init__(self, scales):
         """
@@ -345,13 +361,14 @@ class FCOSTargetGenerator(object):
             assert w % s == 0
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
-        outputs = [image_transposed, bboxes]
+        outputs = [image_transposed]
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
             target = target.transpose((2, 0, 1))
-            target = target[np.newaxis]
+            target = target
             outputs.append(target)
+        outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
 
 

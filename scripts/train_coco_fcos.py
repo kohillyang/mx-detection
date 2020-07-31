@@ -46,6 +46,15 @@ class BCELoss:
         return in_shape, [in_shape[0]]
 
 
+def BCEFocalLoss(x, target):
+    # p = x.sigmoid()
+    # loss = target * ((1-p)**2) * mx.nd.log(p + 1e-7) + (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
+    # return (-1 * loss).mean()
+    bce_loss = BCELoss(x, target)
+    pt = mx.nd.exp(-1 * bce_loss)
+    r = bce_loss * (1-pt) **2
+    return r.sum()
+
 @mobula.op.register
 class L2Loss:
     def forward(self, y, target):
@@ -120,8 +129,11 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     mx.random.seed(3)
     np.random.seed(3)
 
-    batch_size = len(ctx)
-    backbone = FPNResNetV1()
+    batch_size = 8
+    backbone = ResNet()
+    config.FCOS.network.FPN_SCALES = [8]
+    config.FCOS.network.FPN_MINIMUM_DISTANCES = [0]
+    config.FCOS.network.FPN_MAXIMUM_DISTANCES = [1e99]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -157,8 +169,9 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     train_transforms = bbox_t.Compose([
         # Flipping is implemented in dataset.
         # bbox_t.RandomRotate(bound=True, min_angle=-15, max_angle=15),
-        bbox_t.Resize(target_size=config.SCALES[0][0], max_size=config.SCALES[0][1]),
+        # bbox_t.Resize(target_size=config.SCALES[0][0], max_size=config.SCALES[0][1]),
         # bbox_t.RandomResize(scales=[(960, 2000), (800, 1600), (600, 1200)]),
+        bbox_t.ResizePad(dst_h=512, dst_w=512),
         bbox_t.FCOSTargetGenerator(config)
     ])
     val_transforms = bbox_t.Compose([
@@ -167,14 +180,14 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     ])
     from data.bbox.mscoco import COCODetection
     # val_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",), h_flip=False)
-    train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
+    train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                   h_flip=config.TRAIN.FLIP,
                                   transform=train_transforms)
     # val_dataset = YunChongDataSet(is_train=False, h_flip=False)
 
     # train_loader = DataLoader(train_dataset, batchsize=len(ctx))
-    train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=len(ctx), batchify_fn=batch_fn,
-                                            pin_memory=False, num_workers=0, last_batch="discard", shuffle=True)
+    train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
+                                            num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
     # for _ in tqdm.tqdm(train_loader, desc="Checking Dataset"):
     #     pass
 
@@ -183,12 +196,12 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     params_fixed_prefix = config.network.FIXED_PARAMS
     for p in params_all.keys():
         ignore = False
-        if params_fixed_prefix is not None:
-            for f in params_fixed_prefix:
-                if f in str(p):
-                    ignore = True
-                    params_all[p].grad_req = 'null'
-                    logging.info("{} is ignored when training.".format(p))
+        # if params_fixed_prefix is not None:
+        #     for f in params_fixed_prefix:
+        #         if f in str(p):
+        #             ignore = True
+        #             params_all[p].grad_req = 'null'
+        #             logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
     lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step.split(',')]
     logging.info(lr_steps)
@@ -206,7 +219,9 @@ def train_net(ctx, begin_epoch, lr, lr_step):
          'clip_gradient': None,
          'lr_scheduler': lr_scheduler
          })
-
+    # trainer = mx.gluon.Trainer(
+    #     params_to_train,  # fix batchnorm, fix first stage, etc...
+    #     'adam', {"learning_rate": 4e-4})
 
     metric_loss_loc = mx.metric.Loss(name="loss_loc")
     metric_loss_cls = mx.metric.Loss(name="loss_cls")
@@ -219,39 +234,47 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_dataset) // batch_size,
                                                       unit_scale=batch_size)):
-            data_batch_list = [[mx.nd.array(x).as_in_context(c) for x in d] for c, d in zip(ctx, data_batch)]
-            net.collect_params().zero_grad()
+            data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx, batch_axis=0)
+            label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx, batch_axis=0)
+            # label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx, batch_axis=0)
+            # label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx, batch_axis=0)
+            # label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx, batch_axis=0)
+            # label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx, batch_axis=0)
+
             losses = []
             losses_loc = []
             losses_center_ness = []
             losses_cls=[]
             with ag.record():
-                for data_and_label in data_batch_list:
-                    image = data_and_label[0]
-                    bboxes = data_and_label[1]
-                    label = data_and_label[2:]
-                    y_hat = net(image[np.newaxis])
-                    for fpn_label, fpn_prediction in zip(label, y_hat):
+                for data, label0 in zip(data_list, label_0_list,
+                                                                        # label_1_list, label_2_list, label_3_list, label_4_list
+                                                                        ):
+                    labels = [label0]
+                    fpn_predictions = net(data)
+                    for fpn_label, fpn_prediction in zip(labels[::-1], fpn_predictions[::-1]):
                         mask = fpn_label[:, 0:1]
 
                         loc_target = fpn_label[:, 1:5]
                         centerness_target = fpn_label[:, 5:6]
                         class_target = fpn_label[:, 6:]
 
-                        stride = image.shape[0] / class_target.shape[2]
+                        stride = data.shape[2] / class_target.shape[2]
                         loc_prediction = (stride * fpn_prediction[:, :4])
-                        loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
-                        # loc_prediction = loc_prediction.exp()
+                        # loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
+                        loc_prediction = loc_prediction.exp()
                         centerness_prediction = fpn_prediction[:, 4:5]
                         class_prediction = fpn_prediction[:, 5:]
 
                         # loss_loc = mx.nd.smooth_l1(loc_prediction-(1+loc_target).log(), scalar=1.0)
-                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask / (mx.nd.sum(mask) + 1)[np.newaxis]
-                        loss_loc = mx.nd.where(mask, iou_loss, mx.nd.zeros_like(mask))
+                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask / (mx.nd.sum(mask) + 1)
+                        mask_bd = mx.nd.broadcast_like(mask, iou_loss)
+                        loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd))
 
                         # Todo: CrossEntropy Loss-> Focal Loss
                         # loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
-                        loss_cls = BCELoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
+                        # loss_cls = BCELoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
+                        loss_cls = BCEFocalLoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
+
                         # BCE loss
                         # plt.imshow(class_target[0].max(axis=0).asnumpy())
                         # plt.show()
@@ -289,16 +312,18 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 logging.info(msg)
                 eval_metrics.reset()
 
-                plt.imshow(image.asnumpy().astype(np.uint8))
+                plt.imshow(data[0].asnumpy().astype(np.uint8))
                 plt.savefig("output/{}_image.jpg".format(trainer.optimizer.num_update))
 
                 plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy())
                 plt.savefig("output/{}_heatmap.jpg".format(trainer.optimizer.num_update))
+                plt.imshow(class_target[0].max(axis=0).asnumpy())
+                plt.savefig("output/{}_heatmap_target.jpg".format(trainer.optimizer.num_update))
 
-                plt.imshow(y_hat[0][0, 0].asnumpy())
+                plt.imshow(loc_prediction[0, 0].asnumpy())
                 plt.savefig("output/{}_bexp.jpg".format(trainer.optimizer.num_update))
 
-                plt.imshow(y_hat[0][0, 0].exp().asnumpy())
+                plt.imshow(loc_prediction[0, 0].exp().asnumpy())
                 plt.savefig("output/{}_exp.jpg".format(trainer.optimizer.num_update))
 
         save_path = "{}-{}.params".format(config.TRAIN.model_prefix, epoch)
@@ -323,9 +348,9 @@ def main():
 
 
 def demo_net(ctx_list):
-    backbone = ResNet()
+    backbone = FPNResNetV1()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/fpn_coco-2.params")
+    net.collect_params().load("output/fpn_coco-4.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.Resize(target_size=800, max_size=1333)(image, None)
@@ -334,11 +359,13 @@ def demo_net(ctx_list):
     for pred in predictions:
         stride = image_padded.shape[0] // pred.shape[2]
         pred[:, :4] *= stride
-        plt.imshow(pred[0, 0].asnumpy())
+        fig, axes = plt.subplots(1, 2)
+        axes[0].imshow(pred[0, 0].asnumpy())
+        axes[1].imshow(pred[0, 0].exp().asnumpy())
 
         pred[:, :4] = (pred[:, :4]).exp()
-        pred[:, 4] = pred[:, 5].sigmoid()
-        pred[:, 5:] = pred[:, 5:].softmax(axis=1)
+        pred[:, 5] = pred[:, 5].sigmoid()
+        pred[:, 5:] = pred[:, 5:].sigmoid()
 
         plt.show()
         pred_np = pred.asnumpy()

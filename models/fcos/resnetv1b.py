@@ -50,11 +50,11 @@ class FPNResNetV1(mx.gluon.nn.HybridBlock):
             feat_kwargs["norm_kwargs"] = {"num_devices": num_devices}
         assert num_layers in (50, 101, 152)
         if num_layers == 50:
-            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=False, **feat_kwargs)
         elif num_layers == 101:
-            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=False, **feat_kwargs)
         elif num_layers == 152:
-            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=False, **feat_kwargs)
         else:
             raise ValueError("num_layers is not supported, you can implement it by yourselves.")
         self.feat = feat
