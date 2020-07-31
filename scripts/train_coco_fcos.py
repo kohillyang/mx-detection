@@ -156,7 +156,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     params = net.collect_params()
     for key in params.keys():
         if params[key]._data is None:
-            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Normal()
+            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Xavier()
             default_init.set_verbosity(True)
             if params[key].init is not None and hasattr(params[key].init, "set_verbosity"):
                 params[key].init.set_verbosity(True)
