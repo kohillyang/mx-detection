@@ -132,11 +132,11 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
-            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1, activation="relu"))
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
-                self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
+                self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
                 self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
@@ -174,12 +174,6 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     # config.FCOS.network.FPN_MINIMUM_DISTANCES = [0]
     # config.FCOS.network.FPN_MAXIMUM_DISTANCES = [1e99]
     backbone = FPNResNetV1()
-    config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
-    config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
-    config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
-    config.TRAIN.lr = 1e-4
-    config.TRAIN.warmup_lr = 1e-5
-    config.TRAIN.warmup_step = 1000
     batch_size = 4
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
@@ -306,8 +300,9 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         class_target = fpn_label[:, 6:]
 
                         stride = data.shape[2] / class_target.shape[2]
-                        loc_prediction = (stride * fpn_prediction[:, :4])
+                        # loc_prediction = (stride * fpn_prediction[:, :4])
                         # loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
+                        loc_prediction = fpn_prediction[:, 0:4]
                         centerness_prediction = fpn_prediction[:, 4:5]
                         class_prediction = fpn_prediction[:, 5:]
 
@@ -352,27 +347,27 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 metric_loss_center.update(None, l.sum())
             for l in losses_cls:
                 metric_loss_cls.update(None, l.sum())
-            if trainer.optimizer.num_update % 100 == 0:
+            if trainer.optimizer.num_update % 5 == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
                 eval_metrics.reset()
 
                 plt.imshow(data[0].asnumpy().astype(np.uint8))
-                plt.savefig("output/small_lr/{}_image.jpg".format(trainer.optimizer.num_update))
+                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
 
                 plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy())
-                plt.savefig("output/small_lr/{}_heatmap.jpg".format(trainer.optimizer.num_update))
+                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
                 plt.imshow(class_target[0].max(axis=0).asnumpy())
-                plt.savefig("output/small_lr/{}_heatmap_target.jpg".format(trainer.optimizer.num_update))
+                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
 
                 plt.imshow(loc_prediction[0, 0].asnumpy())
-                plt.savefig("output/small_lr/{}_bexp.jpg".format(trainer.optimizer.num_update))
+                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_bexp.jpg".format(trainer.optimizer.num_update)))
 
                 plt.imshow(loc_prediction[0, 0].exp().asnumpy())
-                plt.savefig("output/small_lr/{}_exp.jpg".format(trainer.optimizer.num_update))
+                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
 
-        save_path = "lr-00001-{}-{}.params".format(config.TRAIN.model_prefix, epoch)
+        save_path = os.path.join(config.TRAIN.log_path, "lr-00001-{}-{}.params".format(config.TRAIN.model_prefix, epoch))
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
         trainer_path = save_path + "-trainer.states"
@@ -380,8 +375,16 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
 def main():
     update_config("configs/fcos/coco_without_fpn.yaml")
-    os.makedirs(config.TRAIN.model_prefix, exist_ok=True)
-    log_init(filename=config.TRAIN.model_prefix + "train.log")
+    config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
+    config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
+    config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
+    config.TRAIN.lr = 1e-4
+    config.TRAIN.warmup_lr = 1e-5
+    config.TRAIN.warmup_step = 1000
+    config.TRAIN.log_path="output/lr_{}".format(config.TRAIN.lr)
+    config.gpus = "2,3"
+    os.makedirs(config.TRAIN.log_path, exist_ok=True)
+    log_init(filename=os.path.join(config.TRAIN.log_path, "train.log"))
     msg = pprint.pformat(config)
     logging.info(msg)
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
@@ -430,6 +433,7 @@ def demo_net(ctx_list):
                                 thresh=0)
     plt.show()
     pass
+
 
 if __name__ == '__main__':
     cv2.setNumThreads(1)
