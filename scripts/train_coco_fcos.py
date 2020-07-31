@@ -347,7 +347,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 metric_loss_center.update(None, l.sum())
             for l in losses_cls:
                 metric_loss_cls.update(None, l.sum())
-            if trainer.optimizer.num_update % 5 == 0:
+            if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
@@ -381,8 +381,9 @@ def main():
     config.TRAIN.lr = 1e-4
     config.TRAIN.warmup_lr = 1e-5
     config.TRAIN.warmup_step = 1000
-    config.TRAIN.log_path="output/lr_{}".format(config.TRAIN.lr)
-    config.gpus = "2,3"
+    config.TRAIN.log_path = "output/lr_{}".format(config.TRAIN.lr)
+    config.TRAIN.log_interval = 50
+    config.gpus = "0,1"
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train.log"))
     msg = pprint.pformat(config)
