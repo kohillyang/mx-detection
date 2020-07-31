@@ -129,12 +129,17 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
         with self.name_scope():
             self.feat_cls = mx.gluon.nn.HybridSequential()
             for i in range(4):
-                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
+                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
+                self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
+                self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
             self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1, activation="relu"))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
                 self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, activation="relu"))
+                self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
+                self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
+
             # one extra channel for center-ness, four channel for location regression.
             self.feat_reg.add(mx.gluon.nn.Conv2D(channels=1+4, kernel_size=3, padding=1))
 
@@ -240,7 +245,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
         ignore = False
         if params_fixed_prefix is not None:
             for f in params_fixed_prefix:
-                if f in str(p):
+                if f in str(p) and "group" not in str(p):
                     ignore = True
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
@@ -354,20 +359,20 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 eval_metrics.reset()
 
                 plt.imshow(data[0].asnumpy().astype(np.uint8))
-                plt.savefig("output/{}_image.jpg".format(trainer.optimizer.num_update))
+                plt.savefig("output/small_lr/{}_image.jpg".format(trainer.optimizer.num_update))
 
                 plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy())
-                plt.savefig("output/{}_heatmap.jpg".format(trainer.optimizer.num_update))
+                plt.savefig("output/small_lr/{}_heatmap.jpg".format(trainer.optimizer.num_update))
                 plt.imshow(class_target[0].max(axis=0).asnumpy())
-                plt.savefig("output/{}_heatmap_target.jpg".format(trainer.optimizer.num_update))
+                plt.savefig("output/small_lr/{}_heatmap_target.jpg".format(trainer.optimizer.num_update))
 
                 plt.imshow(loc_prediction[0, 0].asnumpy())
-                plt.savefig("output/{}_bexp.jpg".format(trainer.optimizer.num_update))
+                plt.savefig("output/small_lr/{}_bexp.jpg".format(trainer.optimizer.num_update))
 
                 plt.imshow(loc_prediction[0, 0].exp().asnumpy())
-                plt.savefig("output/{}_exp.jpg".format(trainer.optimizer.num_update))
+                plt.savefig("output/small_lr/{}_exp.jpg".format(trainer.optimizer.num_update))
 
-        save_path = "{}-{}.params".format(config.TRAIN.model_prefix, epoch)
+        save_path = "lr-00001-{}-{}.params".format(config.TRAIN.model_prefix, epoch)
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
         trainer_path = save_path + "-trainer.states"
