@@ -76,19 +76,47 @@ class IoULoss(mx.gluon.nn.Block):
     def __init__(self):
         super(IoULoss, self).__init__()
 
+    def max(self, *args):
+        if len(args) == 1:
+            return args[0]
+        else:
+            maximum = args[0]
+            for arg in args[1:]:
+                maximum = mx.nd.maximum(maximum, arg)
+            return maximum
+
     def forward(self, prediction, target):
         assert prediction.shape[1] == 4
         assert target.shape[1] == 4
         target = mx.nd.maximum(target, mx.nd.ones_like(target))
+        target = mx.nd.log(target)
+
         l, t, r, b = 0, 1, 2, 3 # l, t, r, b
-        X = (target[:, t] + target[:, b]) * (target[:, l] + target[:, r])
-        X_hat = (prediction[:, t] + prediction[:, b]) * (prediction[:, l] + prediction[:, r])
-        I_h = mx.nd.minimum(target[:, t], prediction[:, t]) + mx.nd.minimum(target[:, b], prediction[:, b])
-        I_w = mx.nd.minimum(target[:, l], prediction[:, l]) + mx.nd.minimum(target[:, r], prediction[:, r])
-        I = I_h * I_w
-        U = X + X_hat - I
-        IoU = I / U + 1e-5
-        return -IoU.log()
+        tl = target[:, t] + target[:, l]
+        tr = target[:, t] + target[:, r]
+        bl = target[:, b] + target[:, l]
+        br = target[:, b] + target[:, r]
+        tl_hat = prediction[:, t] + prediction[:, l]
+        tr_hat = prediction[:, t] + prediction[:, r]
+        bl_hat = prediction[:, b] + prediction[:, l]
+        br_hat = prediction[:, b] + prediction[:, r]
+
+        x_t_i = mx.nd.minimum(target[:, t], prediction[:, t])
+        x_b_i = mx.nd.minimum(target[:, b], prediction[:, b])
+        x_l_i = mx.nd.minimum(target[:, l], prediction[:, l])
+        x_r_i = mx.nd.minimum(target[:, r], prediction[:, r])
+
+        tl_i = x_t_i + x_l_i
+        tr_i = x_t_i + x_r_i
+        bl_i = x_b_i + x_l_i
+        br_i = x_b_i + x_r_i
+
+        max_v = self.max(tl, tr, bl, br, tl_hat, tr_hat, bl_hat, br_hat, tl_i, tr_i, bl_i, br_i)
+        I = mx.nd.exp(tl_i - max_v) + mx.nd.exp(tr_i- max_v) + mx.nd.exp(bl_i- max_v) + mx.nd.exp(br_i- max_v)
+        X = mx.nd.exp(tl- max_v) + mx.nd.exp(tr- max_v) + mx.nd.exp(bl- max_v) + mx.nd.exp(br- max_v)
+        X_hat = mx.nd.exp(tl_hat- max_v) + mx.nd.exp(tr_hat- max_v) + mx.nd.exp(bl_hat- max_v) + mx.nd.exp(br_hat- max_v)
+        I_over_U = I / (X + X_hat - I) + 1e-7
+        return -I_over_U.log()
 
 
 def batch_fn(x):
@@ -129,11 +157,18 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     mx.random.seed(3)
     np.random.seed(3)
 
-    batch_size = 8
-    backbone = ResNet()
-    config.FCOS.network.FPN_SCALES = [8]
-    config.FCOS.network.FPN_MINIMUM_DISTANCES = [0]
-    config.FCOS.network.FPN_MAXIMUM_DISTANCES = [1e99]
+    # backbone = ResNet()
+    # config.FCOS.network.FPN_SCALES = [8]
+    # config.FCOS.network.FPN_MINIMUM_DISTANCES = [0]
+    # config.FCOS.network.FPN_MAXIMUM_DISTANCES = [1e99]
+    backbone = FPNResNetV1()
+    config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
+    config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
+    config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
+    config.TRAIN.lr = 1e-5
+    config.TRAIN.warmup_lr = 1e-6
+    config.TRAIN.warmup_step = 1000
+    batch_size = 4
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -171,7 +206,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
         # bbox_t.RandomRotate(bound=True, min_angle=-15, max_angle=15),
         # bbox_t.Resize(target_size=config.SCALES[0][0], max_size=config.SCALES[0][1]),
         # bbox_t.RandomResize(scales=[(960, 2000), (800, 1600), (600, 1200)]),
-        bbox_t.ResizePad(dst_h=512, dst_w=512),
+        bbox_t.ResizePad(dst_h=768, dst_w=768),
         bbox_t.FCOSTargetGenerator(config)
     ])
     val_transforms = bbox_t.Compose([
@@ -196,12 +231,12 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     params_fixed_prefix = config.network.FIXED_PARAMS
     for p in params_all.keys():
         ignore = False
-        # if params_fixed_prefix is not None:
-        #     for f in params_fixed_prefix:
-        #         if f in str(p):
-        #             ignore = True
-        #             params_all[p].grad_req = 'null'
-        #             logging.info("{} is ignored when training.".format(p))
+        if params_fixed_prefix is not None:
+            for f in params_fixed_prefix:
+                if f in str(p):
+                    ignore = True
+                    params_all[p].grad_req = 'null'
+                    logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
     lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step.split(',')]
     logging.info(lr_steps)
@@ -236,20 +271,20 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                                                       unit_scale=batch_size)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx, batch_axis=0)
             label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx, batch_axis=0)
-            # label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx, batch_axis=0)
-            # label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx, batch_axis=0)
-            # label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx, batch_axis=0)
-            # label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx, batch_axis=0)
+            label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx, batch_axis=0)
+            label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx, batch_axis=0)
+            label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx, batch_axis=0)
+            label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx, batch_axis=0)
 
             losses = []
             losses_loc = []
             losses_center_ness = []
             losses_cls=[]
             with ag.record():
-                for data, label0 in zip(data_list, label_0_list,
-                                                                        # label_1_list, label_2_list, label_3_list, label_4_list
+                for data, label0, label1, label2, label3, label4 in zip(data_list, label_0_list,
+                                                                        label_1_list, label_2_list, label_3_list, label_4_list
                                                                         ):
-                    labels = [label0]
+                    labels = [label0, label1, label2, label3, label4]
                     fpn_predictions = net(data)
                     for fpn_label, fpn_prediction in zip(labels[::-1], fpn_predictions[::-1]):
                         mask = fpn_label[:, 0:1]
@@ -261,7 +296,6 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         stride = data.shape[2] / class_target.shape[2]
                         loc_prediction = (stride * fpn_prediction[:, :4])
                         # loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
-                        loc_prediction = loc_prediction.exp()
                         centerness_prediction = fpn_prediction[:, 4:5]
                         class_prediction = fpn_prediction[:, 5:]
 
@@ -306,7 +340,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 metric_loss_center.update(None, l.sum())
             for l in losses_cls:
                 metric_loss_cls.update(None, l.sum())
-            if trainer.optimizer.num_update % 50 == 0:
+            if trainer.optimizer.num_update % 100 == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
