@@ -157,7 +157,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
 
     def hybrid_forward(self, F, x, scale):
         feat_reg = self.feat_reg(x)
-        x_loc = self.feat_reg_loc(feat_reg) * scale
+        x_loc = F.broadcast_mul(self.feat_reg_loc(feat_reg), scale)
         x_centerness = self.feat_reg_centerness(feat_reg)
         x_cls = self.feat_cls(x)
         x = F.concat(x_loc, x_centerness, x_cls, dim=1)
@@ -304,6 +304,7 @@ def train_net(ctx, begin_epoch):
         eval_metrics.add(child_metric)
 
     for epoch in range(begin_epoch, config.TRAIN.end_epoch):
+        net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx, batch_axis=0)
             label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx, batch_axis=0)
@@ -417,8 +418,8 @@ def main():
     config.TRAIN.log_interval = 50
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 728
-    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.image_short_size = 728-128
+    config.TRAIN.image_max_long_size = 1000-128
     config.TRAIN.batch_size = 4
     config.TRAIN.aspect_grouping=True
     config.gpus = [2, 3]
