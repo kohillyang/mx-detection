@@ -292,7 +292,6 @@ def train_net(ctx, begin_epoch, lr, lr_step):
         eval_metrics.add(child_metric)
 
     for epoch in range(begin_epoch, config.TRAIN.end_epoch):
-
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_dataset) // batch_size,
                                                       unit_scale=batch_size)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx, batch_axis=0)
@@ -387,7 +386,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                 plt.imshow(loc_prediction[0, 0].exp().asnumpy())
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
 
-        save_path = os.path.join(config.TRAIN.log_path, "lr-00001-{}-{}.params".format(config.TRAIN.model_prefix, epoch))
+        save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
         trainer_path = save_path + "-trainer.states"
