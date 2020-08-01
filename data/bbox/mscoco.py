@@ -8,6 +8,7 @@ import cv2
 import mxnet as mx
 from gluoncv.utils.bbox import *
 
+from PIL import Image
 from .bbox_dataset import DetectionDataset
 
 __all__ = ['COCODetection']
@@ -99,6 +100,11 @@ class COCODetection(DetectionDataset):
         img_path = self._items[idx]
         label = self._labels[idx]
         return img_path, np.array(label)
+
+    def at_ratio(self, idx):
+        image = Image.open(self._items[idx % len(self._items)])
+        width, height = image.size
+        return 1.0 * width / height
 
     def __getitem__(self, idx):
         img_path, bbox = self.at_with_image_path(idx % len(self._items))

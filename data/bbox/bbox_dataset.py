@@ -251,3 +251,46 @@ class DetectionDataset(Dataset):
 
             oneimg['bndbox'].append([xmin, ymin, xmax, ymax, name])
         return oneimg
+
+
+class AspectGroupingDataset(object):
+    def __init__(self, base_dataset, config):
+        self.base_dataset = base_dataset
+        self.config = config
+        self.aspects = [self.base_dataset.at_ratio(x) for x in range(len(self.base_dataset))]
+        self.aspects_argsort = np.argsort(self.aspects)
+        self.short_size = config.TRAIN.image_short_size
+        self.max_size = config.TRAIN.image_max_long_size
+        import data.transforms.bbox as bbox_t
+        self.transformer = bbox_t.Resize(target_size=self.short_size, max_size=self.max_size)
+        self.target_generator = bbox_t.FCOSTargetGenerator(self.config)
+        self.batch_size = config.TRAIN.batch_size
+
+    def __len__(self):
+        return len(self.base_dataset) // self.batch_size
+
+    def __getitem__(self, idx):
+        images_list = []
+        bboxes_list = []
+        for i in range(self.batch_size):
+            idx_mapped = self.aspects_argsort[idx * self.batch_size + i]
+            image, bbox = self.base_dataset[idx_mapped]
+            image, bbox = self.transformer(image, bbox)
+            images_list.append(image)
+            bboxes_list.append(bbox)
+        pad = lambda x: x if x % 64 == 0 else x + 64 - x % 64
+        max_h = pad(max([x.shape[0] for x in images_list]))
+        max_w = pad(max([x.shape[1] for x in images_list]))
+        for i in range(len(images_list)):
+            image = images_list[i]
+            image0_padded = np.zeros(shape=(max_h, max_w, image.shape[2]), dtype=image.dtype)
+            image0_padded[:image.shape[0], :image.shape[1], :] = image
+            images_list[i] = image0_padded
+        images_and_targets_list = []
+        for i in range(len(images_list)):
+            images_and_targets = self.target_generator(images_list[i], bboxes_list[i])
+            images_and_targets_list.append(images_and_targets)
+        r = []
+        for i in range(len(images_and_targets_list[0])):
+            r.append(mx.nd.concat(*[x[i][np.newaxis] for x in images_and_targets_list], dim=0))
+        return tuple(r)

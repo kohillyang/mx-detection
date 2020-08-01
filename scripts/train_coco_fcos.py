@@ -10,6 +10,7 @@ import mxnet as mx
 import mxnet.autograd as ag
 import numpy as np
 import tqdm
+import time
 
 import matplotlib.pyplot as plt
 
@@ -17,6 +18,7 @@ from models.fcos.resnet import ResNet
 from models.fcos.resnetv1b import FPNResNetV1
 from utils.common import log_init
 from utils.config import config, update_config
+from data.bbox.bbox_dataset import AspectGroupingDataset
 from utils.lrsheduler import WarmupMultiFactorScheduler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
@@ -46,7 +48,7 @@ class BCELoss:
         return in_shape, [in_shape[0]]
 
 
-def BCEFocalLoss(x, target):
+def BCEFocalLossWithoutAlpha(x, target):
     # p = x.sigmoid()
     # loss = target * ((1-p)**2) * mx.nd.log(p + 1e-7) + (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
     # return (-1 * loss).mean()
@@ -54,6 +56,15 @@ def BCEFocalLoss(x, target):
     pt = mx.nd.exp(-1 * bce_loss)
     r = bce_loss * (1-pt) **2
     return r.sum()
+
+
+def BCEFocalLoss(x, target, alpha, gamma):
+    alpha = .25
+    p = x.sigmoid()
+    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-7)
+    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
+    return -loss.sum()
+
 
 @mobula.op.register
 class L2Loss:
@@ -185,7 +196,7 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
             return [self.fcos_head(x)]
 
 
-def train_net(ctx, begin_epoch, lr, lr_step):
+def train_net(ctx, begin_epoch):
     mx.random.seed(3)
     np.random.seed(3)
 
@@ -194,7 +205,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     # config.FCOS.network.FPN_MINIMUM_DISTANCES = [0]
     # config.FCOS.network.FPN_MAXIMUM_DISTANCES = [1e99]
     backbone = FPNResNetV1()
-    batch_size = 4
+    batch_size = config.TRAIN.batch_size
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -241,16 +252,17 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     ])
     from data.bbox.mscoco import COCODetection
     # val_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",), h_flip=False)
-    train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
-                                  h_flip=config.TRAIN.FLIP,
-                                  transform=train_transforms)
-    # val_dataset = YunChongDataSet(is_train=False, h_flip=False)
-
-    # train_loader = DataLoader(train_dataset, batchsize=len(ctx))
-    train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
-                                            num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
-    # for _ in tqdm.tqdm(train_loader, desc="Checking Dataset"):
-    #     pass
+    if config.TRAIN.aspect_grouping:
+        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
+                                           h_flip=config.TRAIN.FLIP, transform=None)
+        train_dataset = AspectGroupingDataset(coco_train_dataset, config)
+        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=lambda x:x,
+                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=True)
+    else:
+        train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
+                                           h_flip=config.TRAIN.FLIP, transform=train_transforms)
+        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
+                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
 
     params_all = net.collect_params()
     params_to_train = {}
@@ -292,8 +304,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
         eval_metrics.add(child_metric)
 
     for epoch in range(begin_epoch, config.TRAIN.end_epoch):
-        for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_dataset) // batch_size,
-                                                      unit_scale=batch_size)):
+        for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx, batch_axis=0)
             label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx, batch_axis=0)
             label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx, batch_axis=0)
@@ -333,7 +344,9 @@ def train_net(ctx, begin_epoch, lr, lr_step):
                         # Todo: CrossEntropy Loss-> Focal Loss
                         # loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
                         # loss_cls = BCELoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
-                        loss_cls = BCEFocalLoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
+                        loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
+                                                gamma=config.TRAIN.cls_focal_loss_gamma)
+                        loss_cls = loss_cls / class_prediction.shape[2] / class_prediction.shape[3]
 
                         # BCE loss
                         # plt.imshow(class_target[0].max(axis=0).asnumpy())
@@ -397,30 +410,35 @@ def main():
     config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
-    config.TRAIN.lr = 1e-4
+    config.TRAIN.lr = 1e-3
     config.TRAIN.warmup_lr = 1e-4
     config.TRAIN.warmup_step = 1000
-    config.TRAIN.log_path = "output/lr_{}".format(config.TRAIN.lr)
+    config.TRAIN.log_path = "output/focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
     config.TRAIN.log_interval = 50
-    config.gpus = "0,1"
+    config.TRAIN.cls_focal_loss_alpha = .25
+    config.TRAIN.cls_focal_loss_gamma = 2
+    config.TRAIN.image_short_size = 728
+    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.batch_size = 4
+    config.TRAIN.aspect_grouping=True
+    config.gpus = [2, 3]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
-    log_init(filename=os.path.join(config.TRAIN.log_path, "train.log"))
+    log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
     os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
-    ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
-    ctx = ctx * config.network.IM_PER_GPU
-    # train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
-    demo_net([mx.gpu(0)])
+    ctx = [mx.gpu(int(i)) for i in config.gpus]
+    train_net(ctx, config.TRAIN.begin_epoch)
+    # demo_net([mx.gpu(0)])
 
 
 def demo_net(ctx_list):
     import gluoncv
     backbone = FPNResNetV1()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/lr_0.0001/0.params")
+    net.collect_params().load("output/lr_0.0001/6.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
