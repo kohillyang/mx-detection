@@ -402,7 +402,7 @@ def main():
     config.TRAIN.warmup_step = 1000
     config.TRAIN.log_path = "output/lr_{}".format(config.TRAIN.lr)
     config.TRAIN.log_interval = 50
-    config.gpus = "2,3"
+    config.gpus = "0,1"
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train.log"))
     msg = pprint.pformat(config)
@@ -412,22 +412,22 @@ def main():
 
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     ctx = ctx * config.network.IM_PER_GPU
-    train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
-    # demo_net([mx.gpu(2)])
+    # train_net(ctx, config.TRAIN.begin_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
+    demo_net([mx.gpu(0)])
 
 
 def demo_net(ctx_list):
+    import gluoncv
     backbone = FPNResNetV1()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/fpn_coco-4.params")
+    net.collect_params().load("output/lr_0.0001/0.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
-    image_padded, _ = bbox_t.Resize(target_size=800, max_size=1333)(image, None)
+    image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
     predictions = net(mx.nd.array(image_padded[np.newaxis], ctx=ctx_list[0]))
     bboxes_pred_list = []
     for pred in predictions:
         stride = image_padded.shape[0] // pred.shape[2]
-        pred[:, :4] *= stride
         fig, axes = plt.subplots(1, 2)
         axes[0].imshow(pred[0, 0].asnumpy())
         axes[1].imshow(pred[0, 0].exp().asnumpy())
@@ -438,17 +438,18 @@ def demo_net(ctx_list):
 
         plt.show()
         pred_np = pred.asnumpy()
-        rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)
-        rois = rois[np.where(rois[:, 4] > 0.0)]
+        rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
+        rois = rois[np.where(rois[:, 4] > 0.1)]
+        print(rois.shape)
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
-    # cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
-    #                               overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
-    #                               force_suppress=True, in_format='corner',
-    #                               out_format='corner').asnumpy()
-    # cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
-    cls_dets = bboxes_pred
-    import gluoncv
+    cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
+                                  overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
+                                  force_suppress=True, in_format='corner',
+                                  out_format='corner').asnumpy()
+    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.2)]
+    # cls_dets = bboxes_pred
+
     gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
                                 thresh=0)
     plt.show()
