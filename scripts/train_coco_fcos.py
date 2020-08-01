@@ -132,7 +132,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
-            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1))
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=1, padding=0))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
@@ -141,12 +141,15 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             # one extra channel for center-ness, four channel for location regression.
-            self.feat_reg.add(mx.gluon.nn.Conv2D(channels=1+4, kernel_size=3, padding=1))
+            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4, kernel_size=1, padding=0)
+            self.feat_reg_centerness = mx.gluon.nn.Conv2D(channels=1, kernel_size=1, padding=0)
 
-    def hybrid_forward(self, F, x, *args, **kwargs):
-        x1 = self.feat_reg(x)
-        x2 = self.feat_cls(x)
-        x = F.concat(x1, x2, dim=1)
+    def hybrid_forward(self, F, x, scale):
+        feat_reg = self.feat_reg(x)
+        x_loc = self.feat_reg_loc(feat_reg) * scale
+        x_centerness = self.feat_reg_centerness(feat_reg)
+        x_cls = self.feat_cls(x)
+        x = F.concat(x_loc, x_centerness, x_cls, dim=1)
         return x
 
 
@@ -155,12 +158,29 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         super(FCOSFPNNet, self).__init__()
         self.backbone = backbone
         self.fcos_head = FCOS_Head(num_classes)
+        with self.name_scope():
+            self.scale0 = self.params.get('scale0', shape=[1, 1, 1, 1],
+                                          init=mx.init.One(),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='write')
+            self.scale1 = self.params.get('scale1', shape=[1, 1, 1, 1],
+                                          init=mx.init.One(),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='write')
+            self.scale2 = self.params.get('scale2', shape=[1, 1, 1, 1],
+                                          init=mx.init.One(),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='write')
+            self.scale3 = self.params.get('scale3', shape=[1, 1, 1, 1],
+                                          init=mx.init.One(),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='write')
+            self.scale4 = self.params.get('scale4', shape=[1, 1, 1, 1],
+                                          init=mx.init.One(),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='write')
 
-    def hybrid_forward(self, F, x, *args, **kwargs):
+    def hybrid_forward(self, F, x, scale0, scale1, scale2, scale3, scale4):
         # typically the strides are (4, 8, 16, 32, 64)
+        scales = [scale0, scale1, scale2, scale3, scale4]
         x = self.backbone(x)
         if isinstance(x, list) or isinstance(x, tuple):
-            return [self.fcos_head(xx) for xx in x]
+            return [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
         else:
             return [self.fcos_head(x)]
 
@@ -221,7 +241,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
     ])
     from data.bbox.mscoco import COCODetection
     # val_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",), h_flip=False)
-    train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
+    train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
                                   h_flip=config.TRAIN.FLIP,
                                   transform=train_transforms)
     # val_dataset = YunChongDataSet(is_train=False, h_flip=False)
@@ -379,11 +399,11 @@ def main():
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN.lr = 1e-4
-    config.TRAIN.warmup_lr = 1e-5
+    config.TRAIN.warmup_lr = 1e-4
     config.TRAIN.warmup_step = 1000
     config.TRAIN.log_path = "output/lr_{}".format(config.TRAIN.lr)
     config.TRAIN.log_interval = 50
-    config.gpus = "0,1"
+    config.gpus = "2,3"
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train.log"))
     msg = pprint.pformat(config)
