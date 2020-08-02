@@ -278,7 +278,8 @@ class AspectGroupingDataset(object):
             image, bbox = self.transformer(image, bbox)
             images_list.append(image)
             bboxes_list.append(bbox)
-        pad = lambda x: x if x % 64 == 0 else x + 64 - x % 64
+        # pad = lambda x: x if x % 128 == 0 else x + 128 - x % 128
+        pad = lambda x:x
         max_h = pad(max([x.shape[0] for x in images_list]))
         max_w = pad(max([x.shape[1] for x in images_list]))
         for i in range(len(images_list)):

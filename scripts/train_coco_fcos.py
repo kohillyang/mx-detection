@@ -11,13 +11,13 @@ import mxnet.autograd as ag
 import numpy as np
 import tqdm
 import time
+import easydict
 
 import matplotlib.pyplot as plt
 
 from models.fcos.resnet import ResNet
 from models.fcos.resnetv1b import FPNResNetV1
 from utils.common import log_init
-from utils.config import config, update_config
 from data.bbox.bbox_dataset import AspectGroupingDataset
 from utils.lrsheduler import WarmupMultiFactorScheduler
 
@@ -196,20 +196,16 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
             return [self.fcos_head(x)]
 
 
-def train_net(ctx, begin_epoch):
+def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    # backbone = ResNet()
-    # config.FCOS.network.FPN_SCALES = [8]
-    # config.FCOS.network.FPN_MINIMUM_DISTANCES = [0]
-    # config.FCOS.network.FPN_MAXIMUM_DISTANCES = [1e99]
     backbone = FPNResNetV1()
     batch_size = config.TRAIN.batch_size
+    ctx_list = [mx.gpu(x) for x in config.gpus]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
-    # resume = "/data/kohill/mop/pretrained/cpm-res50-cropped-flipped_rotated-masked-no-biasbndecay-22-73.63702331152489-193.0866734241876.params"
     resume = None
     if resume is not None:
         params_coco = mx.nd.load(resume)
@@ -236,22 +232,14 @@ def train_net(ctx, begin_epoch):
             else:
                 params[key].initialize(default_init=default_init)
 
-    net.collect_params().reset_ctx(list(set(ctx)))
+    net.collect_params().reset_ctx(list(set(ctx_list)))
 
     train_transforms = bbox_t.Compose([
         # Flipping is implemented in dataset.
-        # bbox_t.RandomRotate(bound=True, min_angle=-15, max_angle=15),
-        # bbox_t.Resize(target_size=config.SCALES[0][0], max_size=config.SCALES[0][1]),
-        # bbox_t.RandomResize(scales=[(960, 2000), (800, 1600), (600, 1200)]),
-        bbox_t.ResizePad(dst_h=768, dst_w=768),
+        bbox_t.ResizePad(dst_h=config.TRAIN.PAD_H, dst_w=config.TRAIN.PAD_W),
         bbox_t.FCOSTargetGenerator(config)
     ])
-    val_transforms = bbox_t.Compose([
-        bbox_t.Resize(target_size=config.SCALES[0][0], max_size=config.SCALES[0][1]),
-        bbox_t.Normalize(),
-    ])
     from data.bbox.mscoco import COCODetection
-    # val_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",), h_flip=False)
     if config.TRAIN.aspect_grouping:
         coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
                                            h_flip=config.TRAIN.FLIP, transform=None)
@@ -276,7 +264,7 @@ def train_net(ctx, begin_epoch):
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
-    lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step.split(',')]
+    lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step]
     logging.info(lr_steps)
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
                                                         warmup_mode="constant", factor=.1,
@@ -303,15 +291,15 @@ def train_net(ctx, begin_epoch):
     for child_metric in [metric_loss_loc, metric_loss_cls, metric_loss_center]:
         eval_metrics.add(child_metric)
 
-    for epoch in range(begin_epoch, config.TRAIN.end_epoch):
+    for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
-            data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx, batch_axis=0)
-            label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx, batch_axis=0)
-            label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx, batch_axis=0)
-            label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx, batch_axis=0)
-            label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx, batch_axis=0)
-            label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx, batch_axis=0)
+            data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
+            label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
+            label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx_list, batch_axis=0)
+            label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx_list, batch_axis=0)
+            label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx_list, batch_axis=0)
+            label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx_list, batch_axis=0)
 
             losses = []
             losses_loc = []
@@ -343,15 +331,10 @@ def train_net(ctx, begin_epoch):
                         loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd))
 
                         # Todo: CrossEntropy Loss-> Focal Loss
-                        # loss_cls = class_prediction * class_target * -1 / class_prediction.shape[0] / class_prediction.shape[1] / class_prediction.shape[2]
-                        # loss_cls = BCELoss(class_prediction, class_target) / class_prediction.shape[2] / class_prediction.shape[3]
                         loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
                                                 gamma=config.TRAIN.cls_focal_loss_gamma)
                         loss_cls = loss_cls / class_prediction.shape[2] / class_prediction.shape[3]
 
-                        # BCE loss
-                        # plt.imshow(class_target[0].max(axis=0).asnumpy())
-                        # plt.show()
                         loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1)
 
                         losses.append(loss_loc)
@@ -361,16 +344,6 @@ def train_net(ctx, begin_epoch):
                         losses_loc.append(loss_loc)
                         losses_center_ness.append(loss_centerness)
                         losses_cls.append(loss_cls)
-
-                        #
-                        # import matplotlib.pyplot as plt
-                        # fig, axes = plt.subplots(1, 4)
-                        # axes = axes.reshape(-1)
-                        # axes[0].imshow(loc_target[0, 0].asnumpy())
-                        # axes[1].imshow(loc_target[0, 1].asnumpy())
-                        # axes[2].imshow(loc_target[0, 2].asnumpy())
-                        # axes[3].imshow(loc_target[0, 3].asnumpy())
-                        # plt.show()
 
             ag.backward(losses)
             trainer.step(batch_size)
@@ -399,44 +372,67 @@ def train_net(ctx, begin_epoch):
 
                 plt.imshow(loc_prediction[0, 0].exp().asnumpy())
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
-
+            if trainer.optimizer.num_update % 5000 == 0:
+                save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
+                net.collect_params().save(save_path)
+                logging.info("Saved checkpoint to {}".format(save_path))
+                trainer_path = save_path + "-trainer.states"
+                trainer.save_states(trainer_path)
         save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
         trainer_path = save_path + "-trainer.states"
         trainer.save_states(trainer_path)
 
+
 def main():
-    update_config("configs/fcos/coco_without_fpn.yaml")
-    config.FCOS.network.FPN_SCALES = [4, 8, 16, 32, 64]
+    os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
+    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+
+    config = easydict.EasyDict()
+    config.dataset = easydict.EasyDict()
+    config.dataset.NUM_CLASSES = 81  # with one background
+    config.dataset.dataset_path = "/data/coco"
+    config.FCOS = easydict.EasyDict()
+    config.FCOS.network = easydict.EasyDict()
+    config.FCOS.network.FPN_SCALES = [8, 16, 32, 64, 128]
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
+    config.TRAIN = easydict.EasyDict()
     config.TRAIN.lr = 1e-3
     config.TRAIN.warmup_lr = 1e-4
     config.TRAIN.warmup_step = 1000
+    config.TRAIN.wd = 1e-4
+    config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
     config.TRAIN.log_interval = 50
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 728-128
-    config.TRAIN.image_max_long_size = 1000-128
+    config.TRAIN.image_short_size = 800
+    config.TRAIN.image_max_long_size = 1280
     config.TRAIN.batch_size = 4
-    config.TRAIN.aspect_grouping=True
+    config.TRAIN.aspect_grouping = True
+    # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
+    config.TRAIN.PAD_H = 768
+    config.TRAIN.PAD_W = 768
+    config.TRAIN.begin_epoch = 0
+    config.TRAIN.end_epoch = 28
+    config.TRAIN.lr_step = [4, 6]
+    config.TRAIN.FLIP = True
+    config.network = easydict.EasyDict()
+    config.network.FIXED_PARAMS = ["beta", "gamma"]
     config.gpus = [2, 3]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
-    os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
-
-    ctx = [mx.gpu(int(i)) for i in config.gpus]
-    train_net(ctx, config.TRAIN.begin_epoch)
-    # demo_net([mx.gpu(0)])
+    train_net(config)
+    # demo_net(config)
 
 
-def demo_net(ctx_list):
+def demo_net(config):
     import gluoncv
+    ctx_list = [mx.gpu(x) for x in config.gpus]
     backbone = FPNResNetV1()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
     net.collect_params().load("output/lr_0.0001/6.params")

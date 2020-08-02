@@ -148,7 +148,7 @@ class Resize(object):
         if np.round(im_scale * im_size_max) > self.max_size:
             im_scale = float(self.max_size) / float(im_size_max)
         im = cv2.resize(image, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_CUBIC)
-        pad = lambda x: x if x % 64 == 0 else x + 64 - x % 64
+        pad = lambda x:x
         im_padded = np.zeros(shape=(pad(im.shape[0]), pad(im.shape[1]), im.shape[2]), dtype=np.float32)
         im_padded[:im.shape[0], :im.shape[1], :] = im
         if bbox is not None and len(bbox) > 1:
@@ -356,9 +356,6 @@ class FCOSTargetGenerator(object):
 
     def __call__(self, image_transposed, bboxes):
         h, w, c = image_transposed.shape
-        for s in self.strides:
-            assert h % s == 0
-            assert w % s == 0
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
         outputs = [image_transposed]

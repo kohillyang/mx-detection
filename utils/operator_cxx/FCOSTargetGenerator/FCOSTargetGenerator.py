@@ -45,11 +45,11 @@ class FCOSTargetGenerator:
         assert len(in_shape[1]) == 2  # number of bboxes * 5
         h, w, c = in_shape[0]
         stride = self.stride
-        assert h % stride == 0
-        assert w % stride == 0
         # one channel for mask
         # 4 channel for bbox
         # one channel for centerness
         # No. of classes channels for class id,
         # 6 + 81 channels in total, if coco dataset is used.
-        return in_shape, [(h // stride, w // self.stride, 6 + self.number_of_classes - 1)]
+        output_h = int(np.ceil(1.0 * h / stride))
+        output_w = int(np.ceil(1.0 * w / stride))
+        return in_shape, [(output_h, output_w, 6 + self.number_of_classes - 1)]

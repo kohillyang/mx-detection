@@ -38,6 +38,31 @@ class PyramidNeck(mx.gluon.nn.HybridBlock):
         return fpn_p2, fpn_p3, fpn_p4, fpn_p5, fpn_p6
 
 
+class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
+    def __init__(self, feature_dim=256):
+        super(PyramidNeckFCOS, self).__init__()
+        self.fpn_p7_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p7_1x1_", strides=2)
+        self.fpn_p6_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p6_1x1_", strides=2)
+        self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
+        self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
+        self.fpn_p3_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p3_1x1_")
+
+    def hybrid_forward(self, F, res2, res3, res4, res5):
+        fpn_p5_1x1 = self.fpn_p5_1x1(res5)
+        fpn_p4_1x1 = self.fpn_p4_1x1(res4)
+        fpn_p3_1x1 = self.fpn_p3_1x1(res3)
+
+        fpn_p5_upsample = F.contrib.BilinearResize2D(fpn_p5_1x1, mode="like", like=fpn_p4_1x1)
+        fpn_p4_plus = F.ElementWiseSum(*[fpn_p5_upsample, fpn_p4_1x1])
+        fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, mode="like", like=fpn_p3_1x1)
+        fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
+
+        p6 = self.fpn_p6_1x1(fpn_p5_1x1)
+        p7 = self.fpn_p7_1x1(p6)
+
+        return fpn_p3_plus, fpn_p4_plus, fpn_p5_1x1, p6, p7
+
+
 class FPNResNetV1(mx.gluon.nn.HybridBlock):
     def __init__(self, feature_dim=256, num_layers=50, sync_bn=False, num_devices=None, pretrained=True):
         super(FPNResNetV1, self).__init__(prefix="resnetv1")
@@ -66,7 +91,7 @@ class FPNResNetV1(mx.gluon.nn.HybridBlock):
                                    allow_deferred_init=False, grad_req='null')
         self.mean._load_init(mx.nd.array([[[[0.485]], [[0.456]], [[0.406]]]]), ctx=mx.cpu())
         self.std._load_init(mx.nd.array([[[[0.229]], [[0.224]], [[0.225]]]]), ctx=mx.cpu())
-        self.neck = PyramidNeck(feature_dim=feature_dim)
+        self.neck = PyramidNeckFCOS(feature_dim=feature_dim)
 
     def hybrid_forward(self, F, x, mean, std=None):
         input = F.transpose(x, (0, 3, 1, 2))
