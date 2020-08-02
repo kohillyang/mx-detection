@@ -139,15 +139,17 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
         super(FCOS_Head, self).__init__()
         with self.name_scope():
             self.feat_cls = mx.gluon.nn.HybridSequential()
+            init = mx.init.Normal(sigma=0.01)
+            init.set_verbosity(True)
             for i in range(4):
-                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
+                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
             self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=1, padding=0))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
-                self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1))
+                self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
                 self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
@@ -392,7 +394,7 @@ def main():
     config = easydict.EasyDict()
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
-    config.dataset.dataset_path = "/data/coco"
+    config.dataset.dataset_path = "/home/kk/xinsika/data1/coco"
     config.FCOS = easydict.EasyDict()
     config.FCOS.network = easydict.EasyDict()
     config.FCOS.network.FPN_SCALES = [8, 16, 32, 64, 128]
@@ -405,7 +407,7 @@ def main():
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 50
+    config.TRAIN.log_interval = 200
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
@@ -421,7 +423,7 @@ def main():
     config.TRAIN.FLIP = True
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = ["beta", "gamma"]
-    config.gpus = [2, 3]
+    config.gpus = [1, 2]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
@@ -432,10 +434,10 @@ def main():
 
 def demo_net(config):
     import gluoncv
-    ctx_list = [mx.gpu(x) for x in config.gpus]
+    ctx_list = [mx.gpu(0)]
     backbone = FPNResNetV1()
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/lr_0.0001/6.params")
+    net.collect_params().load("output/focal_alpha_gamma_lr_0.0001/0-25000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
@@ -443,15 +445,11 @@ def demo_net(config):
     bboxes_pred_list = []
     for pred in predictions:
         stride = image_padded.shape[0] // pred.shape[2]
-        fig, axes = plt.subplots(1, 2)
-        axes[0].imshow(pred[0, 0].asnumpy())
-        axes[1].imshow(pred[0, 0].exp().asnumpy())
 
         pred[:, :4] = (pred[:, :4]).exp()
         pred[:, 5] = pred[:, 5].sigmoid()
         pred[:, 5:] = pred[:, 5:].sigmoid()
 
-        plt.show()
         pred_np = pred.asnumpy()
         rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
         rois = rois[np.where(rois[:, 4] > 0.1)]
@@ -462,7 +460,7 @@ def demo_net(config):
                                   overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
                                   force_suppress=True, in_format='corner',
                                   out_format='corner').asnumpy()
-    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.2)]
+    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
     # cls_dets = bboxes_pred
 
     gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],

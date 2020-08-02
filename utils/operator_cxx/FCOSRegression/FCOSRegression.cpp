@@ -48,7 +48,7 @@ MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int 
                 output[n_bbox*6 + 1] = pred_y0;             
                 output[n_bbox*6 + 2] = pred_x1;             
                 output[n_bbox*6 + 3] = pred_y1;             
-                output[n_bbox*6 + 4] = class_score;    
+                output[n_bbox*6 + 4] = score_used_for_ranking;
                 output[n_bbox*6 + 5] = class_id - ch_cls_start;
                 n_bbox ++;      
             } 
