@@ -387,7 +387,7 @@ def train_net(config):
 
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     config = easydict.EasyDict()
     config.dataset = easydict.EasyDict()
