@@ -241,13 +241,13 @@ def train_net(config):
     ])
     from data.bbox.mscoco import COCODetection
     if config.TRAIN.aspect_grouping:
-        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
+        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=lambda x:x,
                                                 num_workers=16, last_batch="discard", shuffle=True, thread_pool=True)
     else:
-        train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
+        train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                            h_flip=config.TRAIN.FLIP, transform=train_transforms)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
                                                 num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
@@ -399,7 +399,7 @@ def main():
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 1e-3
+    config.TRAIN.lr = 1e-4
     config.TRAIN.warmup_lr = 1e-4
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
@@ -417,7 +417,7 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [4, 6]
+    config.TRAIN.lr_step = [6, 8]
     config.TRAIN.FLIP = True
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = ["beta", "gamma"]
