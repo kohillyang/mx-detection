@@ -204,7 +204,7 @@ def train_net(config):
                                                 num_workers=12, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         assert False
-
+    mx.init.MSRAPrelu
     params_all = net.collect_params()
     params_to_train = {}
     params_fixed_prefix = config.network.FIXED_PARAMS
@@ -301,6 +301,9 @@ def train_net(config):
                 plt.imshow(cls_prediction[0].sigmoid().max(axis=2).max(axis=2).asnumpy())
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
 
+                plt.imshow(label_for_cls[0].sigmoid().max(axis=2).max(axis=2).asnumpy())
+                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
+
                 # plt.imshow(reg_prediction[0, 0, ].exp().asnumpy())
                 # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
             if trainer.optimizer.num_update % 5000 == 0:
@@ -332,8 +335,8 @@ def main():
     config.retinanet.network.RATIOS = [1/2, 1, 2]
 
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.0025
-    config.TRAIN.warmup_lr = 0.0025
+    config.TRAIN.lr = 0.00025
+    config.TRAIN.warmup_lr = 0.00025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9

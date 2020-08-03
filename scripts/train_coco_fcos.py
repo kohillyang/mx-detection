@@ -230,7 +230,7 @@ def train_net(config):
     params = net.collect_params()
     for key in params.keys():
         if params[key]._data is None:
-            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Xavier()
+            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Normal()
             default_init.set_verbosity(True)
             if params[key].init is not None and hasattr(params[key].init, "set_verbosity"):
                 params[key].init.set_verbosity(True)
@@ -345,8 +345,14 @@ def train_net(config):
                         loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd)) / no_pos
 
                         # Todo: CrossEntropy Loss-> Focal Loss
-                        loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
-                                                gamma=config.TRAIN.cls_focal_loss_gamma) / no_pos
+                        # loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
+                        #                         gamma=config.TRAIN.cls_focal_loss_gamma) / no_pos
+                        loss_cls = BCEFocalLossWithoutAlpha(class_prediction, class_target) / no_pos
+                        # loss_cls = loss_cls.sum(axis=1).reshape((loss_cls.shape[0], -1))
+                        # loss_cls_idx = mx.nd.argsort(loss_cls, axis=1, is_ascend=0)
+                        # loss_cls_idx = losses_cls[:, :256]
+                        # loss_cls = mx.nd.pick(losses_cls, loss_cls_idx)
+                        # print(loss_cls_idx.shape)
                         loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / no_pos
 
                         losses.append(loss_loc)
@@ -402,27 +408,30 @@ def main():
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     config = easydict.EasyDict()
+    config.gpus = [0, 1, 2, 3]
+
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
     config.dataset.dataset_path = "/data1/coco"
+
     config.FCOS = easydict.EasyDict()
     config.FCOS.network = easydict.EasyDict()
     config.FCOS.network.FPN_SCALES = [8, 16, 32, 64, 128]
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.0025
-    config.TRAIN.warmup_lr = 0.0025
+    config.TRAIN.lr = 0.00025
+    config.TRAIN.warmup_lr = 0.00025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 200
+    config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1280
-    config.TRAIN.batch_size = 4
+    config.TRAIN.image_short_size = 600
+    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.batch_size = 2 * len(config.gpus)
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
@@ -436,7 +445,6 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.gpus = [0, 1, 2, 3]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
