@@ -198,6 +198,10 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
             return [self.fcos_head(x)]
 
 
+def batch_fn(x):
+    return x
+
+
 def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
@@ -246,7 +250,7 @@ def train_net(config):
         coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config)
-        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=lambda x:x,
+        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
                                                 num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
