@@ -41,8 +41,8 @@ class PyramidNeck(mx.gluon.nn.HybridBlock):
 class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
     def __init__(self, feature_dim=256):
         super(PyramidNeckFCOS, self).__init__()
-        self.fpn_p7_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p7_1x1_", strides=2)
-        self.fpn_p6_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p6_1x1_", strides=2)
+        self.fpn_p7_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p7_1x1_", strides=2, padding=1)
+        self.fpn_p6_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p6_1x1_", strides=2, padding=1)
         self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
         self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
         self.fpn_p3_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p3_1x1_")
@@ -57,14 +57,15 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
         fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, mode="like", like=fpn_p3_1x1)
         fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
 
-        p6 = self.fpn_p6_1x1(fpn_p5_1x1)
-        p7 = self.fpn_p7_1x1(p6)
+        p6 = self.fpn_p6_3x3(F.relu(fpn_p5_1x1))
+        p7 = self.fpn_p7_3x3(F.relu(p6))
 
         return fpn_p3_plus, fpn_p4_plus, fpn_p5_1x1, p6, p7
 
 
 class FPNResNetV1(mx.gluon.nn.HybridBlock):
-    def __init__(self, feature_dim=256, num_layers=50, sync_bn=False, num_devices=None, pretrained=True):
+    def __init__(self, feature_dim=256, num_layers=50, sync_bn=False, num_devices=None,
+                 pretrained=True, use_global_stats=True):
         super(FPNResNetV1, self).__init__(prefix="resnetv1")
         self.eps = 1e-5
         feat_kwargs = {}
@@ -75,11 +76,11 @@ class FPNResNetV1(mx.gluon.nn.HybridBlock):
             feat_kwargs["norm_kwargs"] = {"num_devices": num_devices}
         assert num_layers in (50, 101, 152)
         if num_layers == 50:
-            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
         elif num_layers == 101:
-            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
         elif num_layers == 152:
-            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
         else:
             raise ValueError("num_layers is not supported, you can implement it by yourselves.")
         self.feat = feat

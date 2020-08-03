@@ -59,9 +59,9 @@ def BCEFocalLossWithoutAlpha(x, target):
 def BCEFocalLoss(x, target, alpha=.25, gamma=2):
     alpha = .25
     p = x.sigmoid()
-    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-7)
-    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
-    return -loss.sum()
+    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-11)
+    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-11)
+    return -loss
 
 
 def batch_fn(x):
@@ -156,7 +156,7 @@ def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    backbone = FPNResNetV1()
+    backbone = FPNResNetV1(sync_bn=True, num_devices=4, use_global_stats=False)
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
@@ -235,7 +235,7 @@ def train_net(config):
          })
     # trainer = mx.gluon.Trainer(
     #     params_to_train,  # fix batchnorm, fix first stage, etc...
-    #     'adam', {"learning_rate": 4e-4})
+    #     'adam', {"learning_rate": 1e-4})
     # Please note that the GPU devices of the trainer states when saving must be same with that when loading.
     if config.TRAIN.trainer_resume is not None:
         trainer.load_states(config.TRAIN.trainer_resume)

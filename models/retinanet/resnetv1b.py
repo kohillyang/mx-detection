@@ -64,7 +64,8 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
 
 
 class FPNResNetV1(mx.gluon.nn.HybridBlock):
-    def __init__(self, feature_dim=256, num_layers=50, sync_bn=False, num_devices=None, pretrained=True):
+    def __init__(self, feature_dim=256, num_layers=50, sync_bn=False, num_devices=None,
+                 pretrained=True, use_global_stats=True):
         super(FPNResNetV1, self).__init__(prefix="resnetv1")
         self.eps = 1e-5
         feat_kwargs = {}
@@ -75,11 +76,11 @@ class FPNResNetV1(mx.gluon.nn.HybridBlock):
             feat_kwargs["norm_kwargs"] = {"num_devices": num_devices}
         assert num_layers in (50, 101, 152)
         if num_layers == 50:
-            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
         elif num_layers == 101:
-            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
         elif num_layers == 152:
-            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=True, **feat_kwargs)
+            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
         else:
             raise ValueError("num_layers is not supported, you can implement it by yourselves.")
         self.feat = feat

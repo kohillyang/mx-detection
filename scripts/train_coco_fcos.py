@@ -61,9 +61,9 @@ def BCEFocalLossWithoutAlpha(x, target):
 def BCEFocalLoss(x, target, alpha, gamma):
     alpha = .25
     p = x.sigmoid()
-    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-7)
-    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
-    return -loss.sum()
+    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-1)
+    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-11)
+    return -loss
 
 
 @mobula.op.register
@@ -206,7 +206,7 @@ def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    backbone = FPNResNetV1()
+    backbone = FPNResNetV1(sync_bn=True, num_devices=len(config.gpus), use_global_stats=False)
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
@@ -411,8 +411,8 @@ def main():
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 1e-4
-    config.TRAIN.warmup_lr = 1e-4
+    config.TRAIN.lr = 0.0025
+    config.TRAIN.warmup_lr = 0.0025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
@@ -436,7 +436,7 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.gpus = [2, 3]
+    config.gpus = [0, 1, 2, 3]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
