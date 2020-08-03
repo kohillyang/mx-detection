@@ -254,7 +254,7 @@ class DetectionDataset(Dataset):
 
 
 class AspectGroupingDataset(object):
-    def __init__(self, base_dataset, config):
+    def __init__(self, base_dataset, config, transformer=None, target_generator=None):
         self.base_dataset = base_dataset
         self.config = config
         self.aspects = [self.base_dataset.at_ratio(x) for x in range(len(self.base_dataset))]
@@ -262,8 +262,14 @@ class AspectGroupingDataset(object):
         self.short_size = config.TRAIN.image_short_size
         self.max_size = config.TRAIN.image_max_long_size
         import data.transforms.bbox as bbox_t
-        self.transformer = bbox_t.Resize(target_size=self.short_size, max_size=self.max_size)
-        self.target_generator = bbox_t.FCOSTargetGenerator(self.config)
+        if transformer is None:
+            self.transformer = bbox_t.Resize(target_size=self.short_size, max_size=self.max_size)
+        else:
+            self.transformer = transformer
+        if target_generator is None:
+            self.target_generator = bbox_t.FCOSTargetGenerator(self.config)
+        else:
+            self.target_generator = target_generator
         self.batch_size = config.TRAIN.batch_size
 
     def __len__(self):

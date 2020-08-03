@@ -16,3 +16,4 @@ utils/operator_cxx/FCOSRegression/build/
 utils/operator_cxx/FCOSRecall/build/
 
 .vscode
+utils/operator_cxx/RetinaNetTargetGenerator/build/
