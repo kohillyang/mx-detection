@@ -247,10 +247,10 @@ def train_net(config):
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=lambda x:x,
-                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=True)
+                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                           h_flip=config.TRAIN.FLIP, transform=train_transforms)
+                                      h_flip=config.TRAIN.FLIP, transform=train_transforms)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
                                                 num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
 

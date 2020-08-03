@@ -151,7 +151,7 @@ class Resize(object):
         pad = lambda x:x
         im_padded = np.zeros(shape=(pad(im.shape[0]), pad(im.shape[1]), im.shape[2]), dtype=np.float32)
         im_padded[:im.shape[0], :im.shape[1], :] = im
-        if bbox is not None and len(bbox) > 1:
+        if bbox is not None and len(bbox) >= 1:
             bbox = bbox.astype('f')
             bbox[:, :4] *= im_scale
         return im_padded, bbox
@@ -167,7 +167,7 @@ class ResizePad(object):
         im = cv2.resize(image, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_CUBIC)
         im_padded = np.zeros(shape=(self.dst_h, self.dst_w, im.shape[2]), dtype=np.float32)
         im_padded[:im.shape[0], :im.shape[1], :] = im
-        if bbox is not None and len(bbox) > 1:
+        if bbox is not None and len(bbox) >= 1:
             bbox = bbox.astype('f')
             bbox[:, :4] *= im_scale
         return im_padded, bbox
@@ -191,7 +191,7 @@ class RandomResize(object):
         if np.round(im_scale * im_size_max) > max_size:
             im_scale = float(max_size) / float(im_size_max)
         im = cv2.resize(image, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_CUBIC)
-        if bbox is not None and len(bbox) > 1:
+        if bbox is not None and len(bbox) >= 1:
             bbox = bbox.astype('f')
             bbox[:, :4] *= im_scale
         return im, bbox
@@ -344,7 +344,8 @@ class AssignPyramidAnchor(object):
         bbox_weight = nd.array(label_dict["bbox_weight"])
         return data, im_info, gt_boxes, label, bbox_target, bbox_weight
 
-
+import matplotlib.pyplot as plt
+import gluoncv
 class FCOSTargetGenerator(object):
     def __init__(self, config):
         super(FCOSTargetGenerator, self).__init__()
@@ -359,12 +360,19 @@ class FCOSTargetGenerator(object):
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
         outputs = [image_transposed]
+        # fig, axes = plt.subplots(3, 3)
+        # axes = axes.reshape(-1)
+        # n_axes = 0
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
             target = target.transpose((2, 0, 1))
-            target = target
+            # axes[n_axes].imshow(target[6:].max(axis=0))
+            # n_axes += 1
             outputs.append(target)
+        # axes[n_axes].imshow(image_transposed.astype(np.uint8))
+        # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
+        # plt.show()
         outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
 
