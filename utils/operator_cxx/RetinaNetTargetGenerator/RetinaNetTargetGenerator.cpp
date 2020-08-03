@@ -11,7 +11,7 @@
 namespace mobula {
 
 template <typename T>
-T box_iou(T x0, T x1, T y0, T y1, T hat_x0, T hat_y0, T hat_x1, T hat_y1){
+T box_iou(T x0, T y0, T x1, T y1, T hat_x0, T hat_y0, T hat_x1, T hat_y1){
     T i_w = std::min(hat_x1, x1) - std::max(x0, hat_x0);
     T i_h = std::min(hat_y1, y1) - std::max(y0, hat_y0);
     if(i_w >0 && i_h >0){
@@ -27,7 +27,6 @@ MOBULA_KERNEL retinanet_target_gen_kernel(const int image_h, const int image_w,
 const int feature_h, const int feature_w, const int feature_ch, const int stride,
 const T* bboxes, const int number_of_bboxes, const T negative_iou_threshold, const T positive_iou_threshold,
 T* anchors_base_wh, const int anchors_base_wh_size, T* output) {
-
     for(int f_w=0; f_w < feature_w; f_w++){
         for(int f_h=0; f_h < feature_h; f_h ++){
             T ori_x = f_w * stride + static_cast<T>(stride) / 2;
@@ -39,6 +38,7 @@ T* anchors_base_wh, const int anchors_base_wh_size, T* output) {
 
                 T anchor_w = anchors_base_wh[anchor_idx * 2 + 0];
                 T anchor_h = anchors_base_wh[anchor_idx * 2 + 1];
+
                 T anchor_x0 = ori_x - anchor_w / 2;
                 T anchor_y0 = ori_y - anchor_h / 2;
                 T anchor_x1 = ori_x + anchor_w / 2;

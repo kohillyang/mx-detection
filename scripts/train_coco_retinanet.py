@@ -56,7 +56,7 @@ def BCEFocalLossWithoutAlpha(x, target):
     return r.sum()
 
 
-def BCEFocalLoss(x, target, alpha, gamma):
+def BCEFocalLoss(x, target, alpha=.25, gamma=2):
     alpha = .25
     p = x.sigmoid()
     loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-7)
@@ -69,7 +69,7 @@ def batch_fn(x):
 
 
 class RetinaNet_Head(mx.gluon.nn.HybridBlock):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, num_anchors):
         super(RetinaNet_Head, self).__init__()
         with self.name_scope():
             self.feat_cls = mx.gluon.nn.HybridSequential()
@@ -79,7 +79,8 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
-            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=1, padding=0))
+            num_cls_channel = (num_classes - 1) * num_anchors
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_cls_channel, kernel_size=1, padding=0))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
@@ -87,8 +88,7 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
                 self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
-            # one extra channel for center-ness, four channel for location regression.
-            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4, kernel_size=1, padding=0)
+            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4 * num_anchors, kernel_size=1, padding=0)
 
     def hybrid_forward(self, F, x):
         feat_reg = self.feat_reg(x)
@@ -99,18 +99,18 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
 
 
 class FCOSFPNNet(mx.gluon.nn.HybridBlock):
-    def __init__(self, backbone, num_classes):
+    def __init__(self, backbone, num_classes, num_anchors):
         super(FCOSFPNNet, self).__init__()
         self.backbone = backbone
-        self._head = RetinaNet_Head(num_classes)
+        self._head = RetinaNet_Head(num_classes, num_anchors)
 
     def hybrid_forward(self, F, x):
         # typically the strides are (4, 8, 16, 32, 64)
         x = self.backbone(x)
         if isinstance(x, list) or isinstance(x, tuple):
-            return [self.fcos_head(xx, s) for xx, s in x]
+            return [self._head(xx) for xx in x]
         else:
-            return [self.fcos_head(x)]
+            return [self._head(x)]
 
 
 class RetinaNetTargetGenerator(object):
@@ -126,19 +126,24 @@ class RetinaNetTargetGenerator(object):
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
         outputs = [image_transposed]
-        fig, axes = plt.subplots(3, 3)
-        axes = axes.reshape(-1)
-        n_axes = 0
+        # fig, axes = plt.subplots(3, 3)
+        # axes = axes.reshape(-1)
+        # n_axes = 0
+        num_positive_samples = 0
         for stride, base_size in zip(self.strides, self.base_sizes):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
-            axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
-            n_axes += 1
+            num_positive_samples += target[:, :, :, 1].sum()
+            # axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
+            # n_axes += 1
+            # target = np.transpose(target.reshape((target.shape[0], target.shape[1], -1)), (2, 0, 1))
             outputs.append(target)
-        axes[n_axes].imshow(image_transposed.astype(np.uint8))
-        gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
-        plt.show()
+        num_positive_samples = max(1, num_positive_samples)
+        outputs.append(np.array([num_positive_samples]))
+        # axes[n_axes].imshow(image_transposed.astype(np.uint8))
+        # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
+        # plt.show()
         outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
 
@@ -154,7 +159,8 @@ def train_net(config):
     backbone = FPNResNetV1()
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
-    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
+    num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
+    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
 
     # Resume parameters.
     resume = None
@@ -194,10 +200,8 @@ def train_net(config):
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config,
                                               target_generator=RetinaNetTargetGenerator(config))
-        for _ in train_dataset:
-            pass
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
-                                                num_workers=1, last_batch="discard", shuffle=True, thread_pool=True)
+                                                num_workers=12, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         assert False
 
@@ -239,9 +243,8 @@ def train_net(config):
 
     metric_loss_loc = mx.metric.Loss(name="loss_loc")
     metric_loss_cls = mx.metric.Loss(name="loss_cls")
-    metric_loss_center = mx.metric.Loss(name="loss_center")
     eval_metrics = mx.metric.CompositeEvalMetric()
-    for child_metric in [metric_loss_loc, metric_loss_cls, metric_loss_center]:
+    for child_metric in [metric_loss_loc, metric_loss_cls]:
         eval_metrics.add(child_metric)
 
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
@@ -253,56 +256,37 @@ def train_net(config):
             label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx_list, batch_axis=0)
             label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx_list, batch_axis=0)
             label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx_list, batch_axis=0)
-            number_of_positive_list = mx.gluon.utils.split_and_load(data_batch[6], ctx_list=ctx_list, batch_axis=0)
-
+            number_positive_list = mx.gluon.utils.split_and_load(data_batch[6], ctx_list=ctx_list, batch_axis=0)
             losses = []
             losses_loc = []
-            losses_center_ness = []
             losses_cls=[]
             with ag.record():
-                for data, label0, label1, label2, label3, label4, no_pos in zip(data_list, label_0_list,
+                for data, label0, label1, label2, label3, label4, number_positive in zip(data_list, label_0_list,
                                                                         label_1_list, label_2_list, label_3_list,
-                                                                        label_4_list, number_of_positive_list
+                                                                        label_4_list, number_positive_list
                                                                         ):
                     labels = [label0, label1, label2, label3, label4]
                     fpn_predictions = net(data)
                     for fpn_label, fpn_prediction in zip(labels[::-1], fpn_predictions[::-1]):
-                        mask = fpn_label[:, 0:1]
+                        mask_for_cls = fpn_label[:, :, :, :, 0:1]
+                        mask_for_reg = fpn_label[:, :, :, :, 1:2]
+                        label_for_reg = fpn_label[:, :, :, :, 2:6]
+                        label_for_cls = fpn_label[:, :, :, :, 6:]
+                        reg_prediction = fpn_prediction[:, :4 * num_anchors, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_reg)
+                        cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_cls)
 
-                        loc_target = fpn_label[:, 1:5]
-                        centerness_target = fpn_label[:, 5:6]
-                        class_target = fpn_label[:, 6:]
-
-                        # loc_prediction = (stride * fpn_prediction[:, :4])
-                        # loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
-                        loc_prediction = fpn_prediction[:, 0:4]
-                        centerness_prediction = fpn_prediction[:, 4:5]
-                        class_prediction = fpn_prediction[:, 5:]
-
-                        # loss_loc = mx.nd.smooth_l1(loc_prediction-(1+loc_target).log(), scalar=1.0)
-                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask
-                        mask_bd = mx.nd.broadcast_like(mask, iou_loss)
-                        loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd)) / no_pos
-
-                        # Todo: CrossEntropy Loss-> Focal Loss
-                        loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
-                                                gamma=config.TRAIN.cls_focal_loss_gamma) / no_pos
-                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / no_pos
-
+                        loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / number_positive[:, :, None, None, None]
+                        loss_cls = BCEFocalLoss(cls_prediction, label_for_cls) * mask_for_cls / number_positive[:, :, None, None, None]
                         losses.append(loss_loc)
                         losses.append(loss_cls)
-                        losses.append(loss_centerness)
 
                         losses_loc.append(loss_loc)
-                        losses_center_ness.append(loss_centerness)
                         losses_cls.append(loss_cls)
 
             ag.backward(losses)
             trainer.step(batch_size)
             for l in losses_loc:
                 metric_loss_loc.update(None, l.sum())
-            for l in losses_center_ness:
-                metric_loss_center.update(None, l.sum())
             for l in losses_cls:
                 metric_loss_cls.update(None, l.sum())
             if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
@@ -314,16 +298,11 @@ def train_net(config):
                 plt.imshow(data[0].asnumpy().astype(np.uint8))
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
 
-                plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy())
+                plt.imshow(cls_prediction[0].sigmoid().max(axis=2).max(axis=2).asnumpy())
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
-                plt.imshow(class_target[0].max(axis=0).asnumpy())
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
 
-                plt.imshow(loc_prediction[0, 0].asnumpy())
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_bexp.jpg".format(trainer.optimizer.num_update)))
-
-                plt.imshow(loc_prediction[0, 0].exp().asnumpy())
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
+                # plt.imshow(reg_prediction[0, 0, ].exp().asnumpy())
+                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
             if trainer.optimizer.num_update % 5000 == 0:
                 save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
                 net.collect_params().save(save_path)
@@ -349,18 +328,21 @@ def main():
     config.retinanet.network = easydict.EasyDict()
     config.retinanet.network.FPN_STRIDES = [8, 16, 32, 64, 128]
     config.retinanet.network.BASE_SIZES = [(32, 32), (64, 64), (128, 128), (256, 256), (512, 512)]
+    config.retinanet.network.SCALES = [2**0, 2**(1/2), 2**(2/3)]
+    config.retinanet.network.RATIOS = [1/2, 1, 2]
+
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 1e-4
-    config.TRAIN.warmup_lr = 1e-4
+    config.TRAIN.lr = 0.0025
+    config.TRAIN.warmup_lr = 0.0025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/retinanet_focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 200
+    config.TRAIN.log_interval = 10
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1280
+    config.TRAIN.image_short_size = 600
+    config.TRAIN.image_max_long_size = 1000
     config.TRAIN.batch_size = 4
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
@@ -375,7 +357,7 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.gpus = [0,1]
+    config.gpus = [0,1,2,3]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
