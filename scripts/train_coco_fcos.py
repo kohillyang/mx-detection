@@ -237,6 +237,9 @@ def train_net(config):
                 params[key].initialize(init=params[key].init, default_init=params[key].init)
             else:
                 params[key].initialize(default_init=default_init)
+    if config.TRAIN.resume is not None:
+        net.collect_params().load(config.TRAIN.resume)
+        logging.info("loaded resume from {}".format(config.TRAIN.resume))
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
@@ -289,6 +292,10 @@ def train_net(config):
     # trainer = mx.gluon.Trainer(
     #     params_to_train,  # fix batchnorm, fix first stage, etc...
     #     'adam', {"learning_rate": 4e-4})
+    # Please note that the GPU devices of the trainer states when saving must be same with that when loading.
+    if config.TRAIN.trainer_resume is not None:
+        trainer.load_states(config.TRAIN.trainer_resume)
+        logging.info("loaded trainer states from {}.".format(config.TRAIN.trainer_resume))
 
     metric_loss_loc = mx.metric.Loss(name="loss_loc")
     metric_loss_cls = mx.metric.Loss(name="loss_cls")
@@ -424,6 +431,9 @@ def main():
     config.TRAIN.end_epoch = 28
     config.TRAIN.lr_step = [2, 6, 8]
     config.TRAIN.FLIP = True
+    config.TRAIN.resume = None
+    config.TRAIN.trainer_resume = None
+
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
     config.gpus = [2, 3]
