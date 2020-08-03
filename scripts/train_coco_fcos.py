@@ -326,7 +326,6 @@ def train_net(config):
                         centerness_target = fpn_label[:, 5:6]
                         class_target = fpn_label[:, 6:]
 
-                        stride = data.shape[2] / class_target.shape[2]
                         # loc_prediction = (stride * fpn_prediction[:, :4])
                         # loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
                         loc_prediction = fpn_prediction[:, 0:4]
@@ -334,7 +333,7 @@ def train_net(config):
                         class_prediction = fpn_prediction[:, 5:]
 
                         # loss_loc = mx.nd.smooth_l1(loc_prediction-(1+loc_target).log(), scalar=1.0)
-                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask / no_pos
+                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask
                         mask_bd = mx.nd.broadcast_like(mask, iou_loss)
                         loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd)) / no_pos
 
@@ -405,8 +404,8 @@ def main():
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.0025
-    config.TRAIN.warmup_lr = 0.0025
+    config.TRAIN.lr = 1e-4
+    config.TRAIN.warmup_lr = 1e-4
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9

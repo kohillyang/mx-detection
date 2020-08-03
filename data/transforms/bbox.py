@@ -372,6 +372,7 @@ class FCOSTargetGenerator(object):
             # axes[n_axes].imshow(target[6:].max(axis=0))
             # n_axes += 1
             outputs.append(target)
+        num_pos = max(num_pos, 1)
         outputs.append(np.array([num_pos])[np.newaxis, np.newaxis])
         # axes[n_axes].imshow(image_transposed.astype(np.uint8))
         # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
