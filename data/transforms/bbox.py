@@ -363,13 +363,16 @@ class FCOSTargetGenerator(object):
         # fig, axes = plt.subplots(3, 3)
         # axes = axes.reshape(-1)
         # n_axes = 0
+        num_pos = 0
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
+            num_pos += target[:, :, 0].sum()
             target = target.transpose((2, 0, 1))
             # axes[n_axes].imshow(target[6:].max(axis=0))
             # n_axes += 1
             outputs.append(target)
+        outputs.append(np.array([num_pos])[np.newaxis, np.newaxis])
         # axes[n_axes].imshow(image_transposed.astype(np.uint8))
         # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
         # plt.show()

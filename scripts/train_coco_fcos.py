@@ -306,14 +306,16 @@ def train_net(config):
             label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx_list, batch_axis=0)
             label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx_list, batch_axis=0)
             label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx_list, batch_axis=0)
+            number_of_positive_list = mx.gluon.utils.split_and_load(data_batch[6], ctx_list=ctx_list, batch_axis=0)
 
             losses = []
             losses_loc = []
             losses_center_ness = []
             losses_cls=[]
             with ag.record():
-                for data, label0, label1, label2, label3, label4 in zip(data_list, label_0_list,
-                                                                        label_1_list, label_2_list, label_3_list, label_4_list
+                for data, label0, label1, label2, label3, label4, no_pos in zip(data_list, label_0_list,
+                                                                        label_1_list, label_2_list, label_3_list,
+                                                                        label_4_list, number_of_positive_list
                                                                         ):
                     labels = [label0, label1, label2, label3, label4]
                     fpn_predictions = net(data)
@@ -332,16 +334,14 @@ def train_net(config):
                         class_prediction = fpn_prediction[:, 5:]
 
                         # loss_loc = mx.nd.smooth_l1(loc_prediction-(1+loc_target).log(), scalar=1.0)
-                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask / (mx.nd.sum(mask) + 1)
+                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask / no_pos
                         mask_bd = mx.nd.broadcast_like(mask, iou_loss)
-                        loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd))
+                        loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd)) / no_pos
 
                         # Todo: CrossEntropy Loss-> Focal Loss
                         loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
-                                                gamma=config.TRAIN.cls_focal_loss_gamma)
-                        loss_cls = loss_cls / class_prediction.shape[2] / class_prediction.shape[3]
-
-                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / (mx.nd.sum(mask) + 1)
+                                                gamma=config.TRAIN.cls_focal_loss_gamma) / no_pos
+                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / no_pos
 
                         losses.append(loss_loc)
                         losses.append(loss_cls)
