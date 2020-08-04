@@ -55,7 +55,7 @@ def BCEFocalLossWithoutAlpha(x, target):
     bce_loss = BCELoss(x, target)
     pt = mx.nd.exp(-1 * bce_loss)
     r = bce_loss * (1-pt) **2
-    return r.sum()
+    return r
 
 
 def BCEFocalLoss(x, target, alpha, gamma):
@@ -206,7 +206,8 @@ def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    backbone = FPNResNetV1(sync_bn=True, num_devices=len(config.gpus), use_global_stats=False)
+    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
+                           use_global_stats=config.network.use_global_stats)
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
@@ -273,7 +274,7 @@ def train_net(config):
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
-    lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step]
+    lr_steps = [len(train_loader) * int(x) for x in config.TRAIN.lr_step]
     logging.info(lr_steps)
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
                                                         warmup_mode="constant", factor=.1,
@@ -408,7 +409,7 @@ def main():
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     config = easydict.EasyDict()
-    config.gpus = [0, 1, 2, 3]
+    config.gpus = [2, 3]
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
@@ -416,12 +417,13 @@ def main():
 
     config.FCOS = easydict.EasyDict()
     config.FCOS.network = easydict.EasyDict()
+
     config.FCOS.network.FPN_SCALES = [8, 16, 32, 64, 128]
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.00025
-    config.TRAIN.warmup_lr = 0.00025
+    config.TRAIN.lr = 0.0025
+    config.TRAIN.warmup_lr = 0.0025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
@@ -445,6 +447,8 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
+    config.network.use_global_stats = True
+    config.network.sync_bn = False
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
@@ -456,9 +460,9 @@ def main():
 def demo_net(config):
     import gluoncv
     ctx_list = [mx.gpu(0)]
-    backbone = FPNResNetV1()
+    backbone = FPNResNetV1(sync_bn=True, num_devices=4)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/focal_alpha_gamma_lr_0.0001/0-25000.params")
+    net.collect_params().load("output/focal_alpha_gamma_lr_0.00025/0-20000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
@@ -473,7 +477,7 @@ def demo_net(config):
 
         pred_np = pred.asnumpy()
         rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
-        rois = rois[np.where(rois[:, 4] > 0.1)]
+        rois = rois[np.where(rois[:, 4] > 0.01)]
         print(rois.shape)
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
