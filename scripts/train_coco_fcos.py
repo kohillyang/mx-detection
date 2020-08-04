@@ -14,7 +14,6 @@ import time
 import easydict
 
 import matplotlib.pyplot as plt
-
 from models.fcos.resnet import ResNet
 from models.fcos.resnetv1b import FPNResNetV1
 from utils.common import log_init
@@ -216,6 +215,12 @@ def train_net(config):
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
     if config.TRAIN.USE_FP16:
         net.cast("float16")
+        from mxnet.contrib import amp
+        amp.init()
+    if config.use_hvd:
+        import horovod.mxnet as hvd
+        hvd.init()
+
     # Resume parameters.
     resume = None
     if resume is not None:
@@ -259,7 +264,7 @@ def train_net(config):
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
-                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
+                                                num_workers=0, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                       h_flip=config.TRAIN.FLIP, transform=train_transforms)
@@ -285,16 +290,29 @@ def train_net(config):
                                                         base_lr=config.TRAIN.lr,
                                                         warmup_steps=config.TRAIN.warmup_step,
                                                         warmup_begin_lr=config.TRAIN.warmup_lr)
-
-    trainer = mx.gluon.Trainer(
-        params_to_train,  # fix batchnorm, fix first stage, etc...
-        'sgd',
-        {'wd': config.TRAIN.wd,
-         'momentum': config.TRAIN.momentum,
-         'clip_gradient': None,
-         'lr_scheduler': lr_scheduler,
-         'multi_precision': True,
-         })
+    if config.use_hvd:
+        hvd.broadcast_parameters(net.collect_params(), root_rank=0)
+        trainer = hvd.DistributedTrainer(
+            params_to_train,
+            'sgd',
+            {'wd': config.TRAIN.wd,
+             'momentum': config.TRAIN.momentum,
+             'clip_gradient': None,
+             'lr_scheduler': lr_scheduler,
+             'multi_precision': True,
+             })
+    else:
+        trainer = mx.gluon.Trainer(
+            params_to_train,  # fix batchnorm, fix first stage, etc...
+            'sgd',
+            {'wd': config.TRAIN.wd,
+             'momentum': config.TRAIN.momentum,
+             'clip_gradient': None,
+             'lr_scheduler': lr_scheduler,
+             'multi_precision': True,
+             })
+        if config.TRAIN.USE_FP16:
+            amp.init_trainer(trainer)
     # trainer = mx.gluon.Trainer(
     #     params_to_train,  # fix batchnorm, fix first stage, etc...
     #     'adam', {"learning_rate": 4e-4})
@@ -368,7 +386,15 @@ def train_net(config):
                         losses_loc.append(loss_loc)
                         losses_center_ness.append(loss_centerness)
                         losses_cls.append(loss_cls)
-
+                    # def _sum(xx):
+                    #     r = xx[0].sum()
+                    #     for x in xx[1:]:
+                    #         r = r + x.sum()
+                    #     return r
+                    #
+                    # total_loss = _sum(losses)
+                    # with amp.scale_loss(total_loss, trainer) as scaled_losses:
+                    #     ag.backward(scaled_losses)
             ag.backward(losses)
             trainer.step(batch_size)
             for l in losses_loc:
@@ -412,7 +438,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='QwQ')
     parser.add_argument('--dataset-root', help='coco dataset root contains annotations, train2017 and val2017.',
                             required=False, type=str, default="/data1/coco")
-    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2, 3")
     args = parser.parse_args()
     return args
 
@@ -430,6 +456,7 @@ def main():
 
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
+    config.use_hvd=True
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
@@ -481,10 +508,10 @@ def main():
 
 def demo_net(config):
     import gluoncv
-    ctx_list = [mx.gpu(0)]
-    backbone = FPNResNetV1(sync_bn=True, num_devices=4)
+    ctx_list = [mx.gpu(2)]
+    backbone = FPNResNetV1(sync_bn=False, num_devices=4)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/focal_alpha_gamma_lr_0.00025/0-20000.params")
+    net.collect_params().load("output/focal_alpha_gamma_lr_0.0025/0-15000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
@@ -499,7 +526,7 @@ def demo_net(config):
 
         pred_np = pred.asnumpy()
         rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
-        rois = rois[np.where(rois[:, 4] > 0.01)]
+        rois = rois[np.where(rois[:, 4] > 0.02)]
         print(rois.shape)
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
@@ -507,7 +534,7 @@ def demo_net(config):
                                   overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
                                   force_suppress=True, in_format='corner',
                                   out_format='corner').asnumpy()
-    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
+    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.02)]
     # cls_dets = bboxes_pred
 
     gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
