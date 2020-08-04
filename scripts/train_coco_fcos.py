@@ -141,11 +141,14 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             self.feat_cls = mx.gluon.nn.HybridSequential()
             init = mx.init.Normal(sigma=0.01)
             init.set_verbosity(True)
+            init_bias = mx.init.Constant(-1 * np.log((1-0.01) / 0.01))
+            init_bias.set_verbosity(True)
             for i in range(4):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
-            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=1, padding=0))
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=1, padding=0,
+                                                 bias_initializer=init_bias, weight_initializer=init))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
@@ -154,8 +157,8 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             # one extra channel for center-ness, four channel for location regression.
-            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4, kernel_size=1, padding=0)
-            self.feat_reg_centerness = mx.gluon.nn.Conv2D(channels=1, kernel_size=1, padding=0)
+            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4, kernel_size=1, padding=0, weight_initializer=init)
+            self.feat_reg_centerness = mx.gluon.nn.Conv2D(channels=1, kernel_size=1, padding=0, weight_initializer=init)
 
     def hybrid_forward(self, F, x, scale):
         feat_reg = self.feat_reg(x)
@@ -409,7 +412,7 @@ def main():
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     config = easydict.EasyDict()
-    config.gpus = [2, 3]
+    config.gpus = [1, 2]
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
