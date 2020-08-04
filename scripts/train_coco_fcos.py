@@ -27,7 +27,7 @@ import mobula
 setattr(mobula.config, "NVCC", "/usr/local/cuda-10.0/bin/nvcc")
 mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
-
+import argparse
 
 @mobula.op.register
 class BCELoss:
@@ -406,13 +406,22 @@ def train_net(config):
         trainer_path = save_path + "-trainer.states"
         trainer.save_states(trainer_path)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='QwQ')
+    parser.add_argument('--dataset-root', help='coco dataset root contains annotations, train2017 and val2017.',
+                            required=False, type=str, default="/data1/coco")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
+    args = parser.parse_args()
+    return args
+
 
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    args = parse_args()
 
     config = easydict.EasyDict()
-    config.gpus = [1, 2]
+    config.gpus = [int(x) for x in str(args.gpus).split(',')]
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
