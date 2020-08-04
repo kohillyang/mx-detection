@@ -365,10 +365,8 @@ class FCOSTargetGenerator(object):
         # n_axes = 0
         num_pos = 0
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
-            print("calling op...")
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
-            print("calling op finished.")
 
             num_pos += target[:, :, 0].sum()
             target = target.transpose((2, 0, 1))

@@ -17,3 +17,11 @@ utils/operator_cxx/FCOSRecall/build/
 
 .vscode
 utils/operator_cxx/RetinaNetTargetGenerator/build/
+
+openmpi-4.0.0/
+
+openmpi-4.0.4/
+
+openmpi-4.0.0.tar.gz
+
+openmpi-4.0.4.tar.gz

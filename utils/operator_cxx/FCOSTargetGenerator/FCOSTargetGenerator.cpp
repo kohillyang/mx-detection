@@ -13,7 +13,7 @@ namespace mobula {
 #define UNUSED(expr) do { (void)(expr); } while (0)
 
 template <typename T>
-MOBULA_KERNEL fcos_target_gen_kernel(const int feature_h, const int feature_w, const int feature_ch, const int stride,
+MOBULA_FUNC void fcos_target_gen(const int feature_h, const int feature_w, const int feature_ch, const int stride,
 const T* bboxes, const int number_of_bboxes, T distance_min, T distance_max, T* output) {
     UNUSED(feature_h);
     UNUSED(feature_w);

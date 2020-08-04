@@ -264,7 +264,7 @@ def train_net(config):
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
-                                                num_workers=0, last_batch="discard", shuffle=True, thread_pool=False)
+                                                num_workers=8, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                       h_flip=config.TRAIN.FLIP, transform=train_transforms)
@@ -438,7 +438,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='QwQ')
     parser.add_argument('--dataset-root', help='coco dataset root contains annotations, train2017 and val2017.',
                             required=False, type=str, default="/data1/coco")
-    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2, 3")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
     args = parser.parse_args()
     return args
 
@@ -456,7 +456,7 @@ def main():
 
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
-    config.use_hvd=True
+    config.use_hvd = False
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
