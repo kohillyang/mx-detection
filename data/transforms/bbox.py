@@ -378,6 +378,8 @@ class FCOSTargetGenerator(object):
         # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
         # plt.show()
         outputs = tuple(mx.nd.array(x) for x in outputs)
+        if self.config.TRAIN.USE_FP16:
+            outputs = tuple(x.astype("float16") for x in outputs)
         return outputs
 
 

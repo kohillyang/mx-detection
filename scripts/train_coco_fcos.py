@@ -214,7 +214,8 @@ def train_net(config):
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-
+    if config.TRAIN.USE_FP16:
+        net.cast("float16")
     # Resume parameters.
     resume = None
     if resume is not None:
@@ -291,7 +292,8 @@ def train_net(config):
         {'wd': config.TRAIN.wd,
          'momentum': config.TRAIN.momentum,
          'clip_gradient': None,
-         'lr_scheduler': lr_scheduler
+         'lr_scheduler': lr_scheduler,
+         'multi_precision': True,
          })
     # trainer = mx.gluon.Trainer(
     #     params_to_train,  # fix batchnorm, fix first stage, etc...
@@ -384,15 +386,15 @@ def train_net(config):
                 plt.imshow(data[0].asnumpy().astype(np.uint8))
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
 
-                plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy())
+                plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy().astype(np.float32))
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
-                plt.imshow(class_target[0].max(axis=0).asnumpy())
+                plt.imshow(class_target[0].max(axis=0).asnumpy().astype(np.float32))
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
 
-                plt.imshow(loc_prediction[0, 0].asnumpy())
+                plt.imshow(loc_prediction[0, 0].asnumpy().astype(np.float32))
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_bexp.jpg".format(trainer.optimizer.num_update)))
 
-                plt.imshow(loc_prediction[0, 0].exp().asnumpy())
+                plt.imshow(loc_prediction[0, 0].exp().asnumpy().astype(np.float32))
                 plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
             if trainer.optimizer.num_update % 5000 == 0:
                 save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
@@ -456,7 +458,9 @@ def main():
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
-
+    config.TRAIN.USE_FP16 = False
+    if config.TRAIN.USE_FP16:
+        os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
     config.network.use_global_stats = True
