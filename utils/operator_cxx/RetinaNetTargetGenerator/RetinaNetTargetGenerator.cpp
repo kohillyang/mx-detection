@@ -85,8 +85,8 @@ T* anchors_base_wh, const int anchors_base_wh_size, T* output) {
 
                     output_base[0] = 1; // set cls mask to be 1.
                     output_base[1] = 1; // set regression mask to be 1.
-                    output_base[2] = gt_x0 - anchor_x0;
-                    output_base[3] = gt_y0 - anchor_y0;
+                    output_base[2] = (gt_x0 - anchor_x0) / (anchor_x1 - anchor_x0 + 1);
+                    output_base[3] = (gt_y0 - anchor_y0) / (anchor_y1 - anchor_y0 + 1);
                     output_base[4] = std::log(gt_x1 - gt_x0) - std::log(anchor_x1 - anchor_x0);
                     output_base[5] = std::log(gt_y1 - gt_y0) - std::log(anchor_y1 - anchor_y0);
                     output_base[6 + class_id - 1] = 1;

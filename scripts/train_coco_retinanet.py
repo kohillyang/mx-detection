@@ -125,6 +125,7 @@ class RetinaNetTargetGenerator(object):
         self.base_sizes = self.config.retinanet.network.BASE_SIZES
         self.number_of_classes = self.config.dataset.NUM_CLASSES
         self._debug_show_fig = False
+        self.bbox_norm_coef = self.config.retinanet.network.bbox_norm_coef
 
     def __call__(self, image_transposed, bboxes):
         h, w, c = image_transposed.shape
@@ -140,6 +141,7 @@ class RetinaNetTargetGenerator(object):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
+            target[:, :, :, 1:5] /= np.array(self.bbox_norm_coef)[None, None, None]
             num_positive_samples += target[:, :, :, 1].sum()
             if self._debug_show_fig:
                 axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
@@ -275,15 +277,16 @@ def train_net(config):
                     labels = [label0, label1, label2, label3, label4]
                     fpn_predictions = net(data)
                     for fpn_label, fpn_prediction in zip(labels[::-1], fpn_predictions[::-1]):
-                        mask_for_cls = fpn_label[:, :, :, :, 0:1]
+                        mask_for_cls = fpn_label[:, :, :, :, 0]
                         mask_for_reg = fpn_label[:, :, :, :, 1:2]
                         label_for_reg = fpn_label[:, :, :, :, 2:6]
                         label_for_cls = fpn_label[:, :, :, :, 6:]
                         reg_prediction = fpn_prediction[:, :4 * num_anchors, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_reg)
                         cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_cls)
 
+                        # Todo: beta should be 1/9 here, but it seems that beta can't be set...
                         loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / number_positive[:, :, None, None, None]
-                        loss_cls = BCEFocalLoss(cls_prediction, label_for_cls) * mask_for_cls / number_positive[:, :, None, None, None]
+                        loss_cls = BCEFocalLoss(cls_prediction, label_for_cls).sum(axis=4) * mask_for_cls / number_positive[:, :, None, None]
                         losses.append(loss_loc)
                         losses.append(loss_cls)
 
@@ -331,6 +334,8 @@ def main():
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
 
     config = easydict.EasyDict()
+    config.gpus = [0,1]
+
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
     config.dataset.dataset_path = "/data1/coco"
@@ -340,20 +345,21 @@ def main():
     config.retinanet.network.BASE_SIZES = [(32, 32), (64, 64), (128, 128), (256, 256), (512, 512)]
     config.retinanet.network.SCALES = [2**0, 2**(1/2), 2**(2/3)]
     config.retinanet.network.RATIOS = [1/2, 1, 2]
+    config.retinanet.network.bbox_norm_coef = [0.1, 0.1, 0.2, 0.2]
 
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.0025
-    config.TRAIN.warmup_lr = 0.00025
+    config.TRAIN.batch_size = 2 * len(config.gpus)
+    config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
+    config.TRAIN.warmup_lr = config.TRAIN.lr
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/retinanet_focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 200
+    config.TRAIN.log_interval = 10
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 600
     config.TRAIN.image_max_long_size = 1000
-    config.TRAIN.batch_size = 4
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
@@ -367,14 +373,12 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.gpus = [0,1]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
     train_net(config)
     # demo_net(config)
-
 
 def demo_net(config):
     import gluoncv
@@ -409,6 +413,7 @@ def demo_net(config):
 
     gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
                                 thresh=0)
+    gluoncv.model_zoo.get_model()
     plt.show()
     pass
 
