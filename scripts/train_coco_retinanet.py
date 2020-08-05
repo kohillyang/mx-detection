@@ -4,6 +4,7 @@ import logging
 import os
 import pprint
 import sys
+import argparse
 
 import cv2
 import mxnet as mx
@@ -166,7 +167,7 @@ def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    backbone = FPNResNetV1(sync_bn=False, num_devices=4, use_global_stats=True)
+    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus), use_global_stats=config.network.use_global_stats)
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
@@ -329,16 +330,30 @@ def train_net(config):
         trainer.save_states(trainer_path)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='QwQ')
+    parser.add_argument('--dataset-root', help='coco dataset root contains annotations, train2017 and val2017.',
+                            required=False, type=str, default="/data1/coco")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
+    args = parser.parse_args()
+    return args
+
+
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    os.environ['MXNET_GPU_MEM_POOL_ROUND_LINEAR_CUTOFF'] = '26'
+    os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_FWD'] = '999'
+    os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
+    os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
+    os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
+    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    args = parse_args()
 
     config = easydict.EasyDict()
-    config.gpus = [0,1]
-
+    config.gpus = [int(x) for x in str(args.gpus).split(',')]
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
-    config.dataset.dataset_path = "/data1/coco"
+    config.dataset.dataset_path = args.dataset_root
     config.retinanet = easydict.EasyDict()
     config.retinanet.network = easydict.EasyDict()
     config.retinanet.network.FPN_STRIDES = [8, 16, 32, 64, 128]
@@ -373,12 +388,16 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
+    config.network.use_global_stats = False
+    config.network.sync_bn = True
+
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
     train_net(config)
     # demo_net(config)
+
 
 def demo_net(config):
     import gluoncv
