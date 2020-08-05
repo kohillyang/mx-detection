@@ -30,7 +30,7 @@ class RetinaNetRegression:
         assert nbatch == 1
         if self.req[0] == req.add:
             out_temp = self.F.zeros_like(out)
-            mobula.func.retinanet_target_gen(image_h=image_h, image_w=image_w,
+            mobula.func.retinanet_regression(image_h=image_h, image_w=image_w,
                                              n_batch=nbatch, feature_h=feature_h, feature_w=feature_w,
                                              n_anchor=number_of_anchors, n_ch=out_c, feature=feature,
                                              stride=self.stride,
@@ -41,7 +41,7 @@ class RetinaNetRegression:
             self.y[:] += out_temp
         else:
             self.y[:] = 0
-            mobula.func.retinanet_target_gen(image_h=image_h, image_w=image_w,
+            mobula.func.retinanet_regression(image_h=image_h, image_w=image_w,
                                              n_batch=nbatch, feature_h=feature_h, feature_w=feature_w,
                                              n_anchor=number_of_anchors, n_ch=out_c, feature=feature,
                                              stride=self.stride,

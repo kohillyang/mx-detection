@@ -13,7 +13,7 @@ namespace mobula {
 #define UNUSED(expr) do { (void)(expr); } while (0)
 
 template <typename T>
-MOBULA_FUNC void retinanet_target_gen(const int image_h, const int image_w,
+MOBULA_FUNC void retinanet_regression(const int image_h, const int image_w,
 		const int n_batch, const int feature_h,
 		const int feature_w, const int n_anchor, const int n_ch, const T* feature,
 		const int stride, const T* anchors_base_wh, const int anchors_base_wh_size,

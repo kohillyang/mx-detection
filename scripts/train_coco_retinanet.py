@@ -396,8 +396,8 @@ def main():
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
-    # train_net(config)
-    demo_net(config)
+    train_net(config)
+    # demo_net(config)
 
 
 def demo_net(config):
