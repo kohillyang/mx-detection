@@ -206,7 +206,7 @@ def train_net(config):
 
     from data.bbox.mscoco import COCODetection
     if config.TRAIN.aspect_grouping:
-        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
+        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                            h_flip=config.TRAIN.FLIP, transform=None)
         train_dataset = AspectGroupingDataset(coco_train_dataset, config,
                                               target_generator=RetinaNetTargetGenerator(config))
