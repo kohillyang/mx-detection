@@ -53,7 +53,7 @@ def BCEFocalLossWithoutAlpha(x, target):
     bce_loss = BCELoss(x, target)
     pt = mx.nd.exp(-1 * bce_loss)
     r = bce_loss * (1-pt) **2
-    return r.sum()
+    return r
 
 
 def BCEFocalLoss(x, target, alpha=.25, gamma=2):
@@ -75,12 +75,15 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
             self.feat_cls = mx.gluon.nn.HybridSequential()
             init = mx.init.Normal(sigma=0.01)
             init.set_verbosity(True)
+            init_bias = mx.init.Constant(-1 * np.log((1-0.01) / 0.01))
+            init_bias.set_verbosity(True)
             for i in range(4):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
             num_cls_channel = (num_classes - 1) * num_anchors
-            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_cls_channel, kernel_size=1, padding=0))
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_cls_channel, kernel_size=1, padding=0,
+                                                 bias_initializer=init_bias, weight_initializer=init))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
@@ -88,7 +91,8 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
                 self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
-            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4 * num_anchors, kernel_size=1, padding=0)
+            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4 * num_anchors, kernel_size=1, padding=0,
+                                                   weight_initializer=init)
 
     def hybrid_forward(self, F, x):
         feat_reg = self.feat_reg(x)
@@ -120,30 +124,34 @@ class RetinaNetTargetGenerator(object):
         self.strides = self.config.retinanet.network.FPN_STRIDES
         self.base_sizes = self.config.retinanet.network.BASE_SIZES
         self.number_of_classes = self.config.dataset.NUM_CLASSES
+        self._debug_show_fig = False
 
     def __call__(self, image_transposed, bboxes):
         h, w, c = image_transposed.shape
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
         outputs = [image_transposed]
-        # fig, axes = plt.subplots(3, 3)
-        # axes = axes.reshape(-1)
-        # n_axes = 0
+        if self._debug_show_fig:
+            fig, axes = plt.subplots(3, 3)
+            axes = axes.reshape(-1)
+            n_axes = 0
         num_positive_samples = 0
         for stride, base_size in zip(self.strides, self.base_sizes):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
             num_positive_samples += target[:, :, :, 1].sum()
-            # axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
-            # n_axes += 1
+            if self._debug_show_fig:
+                axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
+                n_axes += 1
             # target = np.transpose(target.reshape((target.shape[0], target.shape[1], -1)), (2, 0, 1))
             outputs.append(target)
         num_positive_samples = max(1, num_positive_samples)
         outputs.append(np.array([num_positive_samples]))
-        # axes[n_axes].imshow(image_transposed.astype(np.uint8))
-        # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
-        # plt.show()
+        if self._debug_show_fig:
+            axes[n_axes].imshow(image_transposed.astype(np.uint8))
+            gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
+            plt.show()
         outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
 
@@ -156,7 +164,7 @@ def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    backbone = FPNResNetV1(sync_bn=True, num_devices=4, use_global_stats=False)
+    backbone = FPNResNetV1(sync_bn=False, num_devices=4, use_global_stats=True)
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
@@ -204,7 +212,6 @@ def train_net(config):
                                                 num_workers=12, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         assert False
-    mx.init.MSRAPrelu
     params_all = net.collect_params()
     params_to_train = {}
     params_fixed_prefix = config.network.FIXED_PARAMS
@@ -335,13 +342,13 @@ def main():
     config.retinanet.network.RATIOS = [1/2, 1, 2]
 
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.00025
+    config.TRAIN.lr = 0.0025
     config.TRAIN.warmup_lr = 0.00025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/retinanet_focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 10
+    config.TRAIN.log_interval = 200
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 600
@@ -360,7 +367,7 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.gpus = [0,1,2,3]
+    config.gpus = [0,1]
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)

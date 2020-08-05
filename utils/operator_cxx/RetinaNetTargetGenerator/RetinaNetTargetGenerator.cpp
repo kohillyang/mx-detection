@@ -23,7 +23,7 @@ T box_iou(T x0, T y0, T x1, T y1, T hat_x0, T hat_y0, T hat_x1, T hat_y1){
 #define UNUSED(expr) do { (void)(expr); } while (0)
 
 template <typename T>
-MOBULA_KERNEL retinanet_target_gen_kernel(const int image_h, const int image_w,
+MOBULA_FUNC void retinanet_target_gen(const int image_h, const int image_w,
 const int feature_h, const int feature_w, const int feature_ch, const int stride,
 const T* bboxes, const int number_of_bboxes, const T negative_iou_threshold, const T positive_iou_threshold,
 T* anchors_base_wh, const int anchors_base_wh_size, T* output) {

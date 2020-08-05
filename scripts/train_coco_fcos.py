@@ -61,7 +61,7 @@ def BCEFocalLossWithoutAlpha(x, target):
 def BCEFocalLoss(x, target, alpha, gamma):
     alpha = .25
     p = x.sigmoid()
-    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-1)
+    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-11)
     loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-11)
     return -loss
 
