@@ -346,7 +346,7 @@ def main():
     os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
     os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
     os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
 
     config = easydict.EasyDict()
