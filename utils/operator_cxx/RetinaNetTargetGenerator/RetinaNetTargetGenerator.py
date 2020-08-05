@@ -38,6 +38,7 @@ class RetinaNetTargetGenerator:
                                              negative_iou_threshold=self.negative_iou_threshold,
                                              positive_iou_threshold=self.positive_iou_threshold,
                                              anchors_base_wh=self.anchors_base_wh,
+                                             # anchors_base_wh_size is No. of the anchors.
                                              anchors_base_wh_size=self.anchors_base_wh.shape[0],
                                              output=out_temp)
             self.y[:] += out_temp
@@ -50,6 +51,7 @@ class RetinaNetTargetGenerator:
                                              negative_iou_threshold=self.negative_iou_threshold,
                                              positive_iou_threshold=self.positive_iou_threshold,
                                              anchors_base_wh=self.anchors_base_wh,
+                                             # anchors_base_wh_size is No. of the anchors.
                                              anchors_base_wh_size=self.anchors_base_wh.shape[0],
                                              output=self.y)
 

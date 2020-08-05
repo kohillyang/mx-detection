@@ -25,3 +25,13 @@ openmpi-4.0.4/
 openmpi-4.0.0.tar.gz
 
 openmpi-4.0.4.tar.gz
+
+.settings/
+
+.cproject
+
+.project
+
+.pydevproject
+
+utils/operator_cxx/RetinaNetRegression/build/

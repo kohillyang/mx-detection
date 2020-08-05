@@ -26,6 +26,7 @@ import data.transforms.bbox as bbox_t
 import mobula
 setattr(mobula.config, "NVCC", "/usr/local/cuda-10.0/bin/nvcc")
 mobula.op.load('RetinaNetTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+mobula.op.load('RetinaNetRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
 
 @mobula.op.register
@@ -227,7 +228,7 @@ def train_net(config):
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
         if not ignore: params_to_train[p] = params_all[p]
-    lr_steps = [len(train_dataset) // batch_size * int(x) for x in config.TRAIN.lr_step]
+    lr_steps = [len(train_loader)  * int(x) for x in config.TRAIN.lr_step]
     logging.info(lr_steps)
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
                                                         warmup_mode="constant", factor=.1,
@@ -370,7 +371,7 @@ def main():
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/retinanet_focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 10000
+    config.TRAIN.log_interval = 1000
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 600
@@ -395,31 +396,42 @@ def main():
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
-    train_net(config)
-    # demo_net(config)
+    # train_net(config)
+    demo_net(config)
 
 
 def demo_net(config):
     import gluoncv
-    ctx_list = [mx.gpu(0)]
-    backbone = FPNResNetV1()
-    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/focal_alpha_gamma_lr_0.0001/0-25000.params")
+    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus), use_global_stats=config.network.use_global_stats)
+    ctx_list = [mx.gpu(x) for x in config.gpus]
+    num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
+    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
+    net.collect_params().load("output/retinanet_focal_alpha_gamma_lr_0.005/0-10000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
-    predictions = net(mx.nd.array(image_padded[np.newaxis], ctx=ctx_list[0]))
+    data = mx.nd.array(image_padded[np.newaxis], ctx=ctx_list[0])
+    predictions = net(data)
     bboxes_pred_list = []
-    for pred in predictions:
-        stride = image_padded.shape[0] // pred.shape[2]
-
-        pred[:, :4] = (pred[:, :4]).exp()
-        pred[:, 5] = pred[:, 5].sigmoid()
-        pred[:, 5:] = pred[:, 5:].sigmoid()
-
-        pred_np = pred.asnumpy()
-        rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
-        rois = rois[np.where(rois[:, 4] > 0.1)]
+    num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
+    for fpn_prediction, base_size in zip(predictions, config.retinanet.network.BASE_SIZES):
+        stride = image_padded.shape[0] // fpn_prediction.shape[2]
+        fpn_prediction_transposed = fpn_prediction.transpose((0, 2, 3, 1))
+        fpn_prediction_reshaped = fpn_prediction_transposed.reshape((0, 0, 0, num_anchors, -1))
+        fpn_prediction_reshaped[:, :, :, :, 4:] = fpn_prediction_reshaped[:, :, :, :, 4:].sigmoid()
+        fpn_prediction_reshaped_np = fpn_prediction_reshaped.asnumpy()
+        fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
+        rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
+                                                         base_size=base_size,
+                                                         cls_threshold=.01,
+                                                         stride = stride
+                                                         )(image=data.asnumpy(),
+                                                           feature=fpn_prediction_reshaped_np)
+        # plt.imshow(fpn_prediction_reshaped_np[0, :, :, :, 4:].max(axis=2).max(axis=2))
+        # plt.show()
+        print(rois.shape)
+        rois = rois[0]
+        rois = rois[np.where(rois[:, 4] > 0.7)]
         print(rois.shape)
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
@@ -427,12 +439,11 @@ def demo_net(config):
                                   overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
                                   force_suppress=True, in_format='corner',
                                   out_format='corner').asnumpy()
-    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
+    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.94)]
     # cls_dets = bboxes_pred
 
     gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
                                 thresh=0)
-    gluoncv.model_zoo.get_model()
     plt.show()
     pass
 
