@@ -285,7 +285,7 @@ def train_net(config):
                         cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_cls)
 
                         # Todo: beta should be 1/9 here, but it seems that beta can't be set...
-                        loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / number_positive[:, :, None, None, None]
+                        loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / 4 / number_positive[:, :, None, None, None]
                         loss_cls = BCEFocalLoss(cls_prediction, label_for_cls).sum(axis=4) * mask_for_cls / number_positive[:, :, None, None]
                         losses.append(loss_loc)
                         losses.append(loss_cls)
@@ -355,7 +355,7 @@ def main():
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/retinanet_focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
-    config.TRAIN.log_interval = 10
+    config.TRAIN.log_interval = 10000
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 600
