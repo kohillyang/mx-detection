@@ -12,7 +12,8 @@ import numpy as np
 import tqdm
 import time
 import easydict
-
+import matplotlib
+matplotlib.use("agg")
 import matplotlib.pyplot as plt
 from models.fcos.resnet import ResNet
 from models.fcos.resnetv1b import FPNResNetV1
@@ -460,7 +461,7 @@ def main():
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = 81  # with one background
-    config.dataset.dataset_path = "/data1/coco"
+    config.dataset.dataset_path = args.dataset_root
 
     config.FCOS = easydict.EasyDict()
     config.FCOS.network = easydict.EasyDict()
@@ -469,7 +470,8 @@ def main():
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.lr = 0.0025
+    config.TRAIN.batch_size = 2 * len(config.gpus)
+    config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
     config.TRAIN.warmup_lr = 0.0025
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
@@ -480,14 +482,13 @@ def main():
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 600
     config.TRAIN.image_max_long_size = 1000
-    config.TRAIN.batch_size = 2 * len(config.gpus)
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [2, 6, 8]
+    config.TRAIN.lr_step = [16, 20]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
@@ -496,8 +497,8 @@ def main():
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.use_global_stats = True
-    config.network.sync_bn = False
+    config.network.use_global_stats = False
+    config.network.sync_bn = True
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
@@ -511,7 +512,7 @@ def demo_net(config):
     ctx_list = [mx.gpu(2)]
     backbone = FPNResNetV1(sync_bn=False, num_devices=4)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/focal_alpha_gamma_lr_0.0025/0-15000.params")
+    net.collect_params().load("output/focal_alpha_gamma_lr_0.0025/0-65000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     image = cv2.imread("figures/000000000785.jpg")[:, :, ::-1]
     image_padded, _ = bbox_t.ResizePad(768, 768)(image, None)
@@ -526,7 +527,7 @@ def demo_net(config):
 
         pred_np = pred.asnumpy()
         rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
-        rois = rois[np.where(rois[:, 4] > 0.02)]
+        rois = rois[np.where(rois[:, 4] > 0.024)]
         print(rois.shape)
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
@@ -534,7 +535,7 @@ def demo_net(config):
                                   overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
                                   force_suppress=True, in_format='corner',
                                   out_format='corner').asnumpy()
-    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.02)]
+    cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.025)]
     # cls_dets = bboxes_pred
 
     gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
