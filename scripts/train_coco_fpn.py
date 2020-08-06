@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import logging
 import os
+import sys
 import pprint
 
 import cv2
@@ -20,7 +21,7 @@ from utils.im_detect import im_detect_bbox_aug
 from utils.lrsheduler import WarmupMultiFactorScheduler
 from utils.parallel import DataParallelModel
 from utils.proposal_target import proposal_target
-
+sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 
 # metric
 class RPNAccuMetric(mx.metric.EvalMetric):
@@ -230,7 +231,7 @@ def train_net(ctx, begin_epoch, lr, lr_step):
 
     net_with_criterion = RCNNWithCriterion(base_net=net)
     net_parallel = DataParallelModel(net_with_criterion, ctx_list=ctx,
-                                     sync=False if config.network.IM_PER_GPU is 1 else False)
+                                     sync=True if config.network.IM_PER_GPU is 1 else False)
 
     for epoch in range(begin_epoch, config.TRAIN.end_epoch):
         eval_metrics.reset()
