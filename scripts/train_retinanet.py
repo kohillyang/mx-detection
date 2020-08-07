@@ -208,9 +208,18 @@ def train_net(config):
 
     from data.bbox.mscoco import COCODetection
     if config.TRAIN.aspect_grouping:
-        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                           h_flip=config.TRAIN.FLIP, transform=None)
-        train_dataset = AspectGroupingDataset(coco_train_dataset, config,
+        if config.dataset.dataset_type == "coco":
+            from data.bbox.mscoco import COCODetection
+            base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
+                                               h_flip=config.TRAIN.FLIP, transform=None)
+        elif config.dataset.dataset_type == "voc":
+            from data.bbox.voc import VOCDetection
+            base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
+                                              splits=((2007, 'trainval'), (2012, 'trainval')),
+                                              preload_label=False)
+        else:
+            assert False
+        train_dataset = AspectGroupingDataset(base_train_dataset, config,
                                               target_generator=RetinaNetTargetGenerator(config))
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
                                                 num_workers=12, last_batch="discard", shuffle=True, thread_pool=False)
@@ -333,9 +342,12 @@ def train_net(config):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='QwQ')
-    parser.add_argument('--dataset-root', help='coco dataset root contains annotations, train2017 and val2017.',
-                            required=False, type=str, default="/data1/coco")
-    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
+    parser.add_argument('--dataset-type', help='voc or coco', required=False, type=str, default="coco")
+    parser.add_argument('--num-classes', help='num-classes', required=False, type=int, default=81)
+    parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
+    parser.add_argument('--demo', help='demo', action="store_true")
+
     args = parser.parse_args()
     return args
 
@@ -353,7 +365,8 @@ def main():
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
     config.dataset = easydict.EasyDict()
-    config.dataset.NUM_CLASSES = 81  # with one background
+    config.dataset.NUM_CLASSES = args.num_classes
+    config.dataset.dataset_type = args.dataset_type
     config.dataset.dataset_path = args.dataset_root
     config.retinanet = easydict.EasyDict()
     config.retinanet.network = easydict.EasyDict()
@@ -370,7 +383,7 @@ def main():
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
-    config.TRAIN.log_path = "output/retinanet_focal_alpha_gamma_lr_{}".format(config.TRAIN.lr)
+    config.TRAIN.log_path = "output/{}/focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
     config.TRAIN.log_interval = 1000
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
@@ -389,15 +402,17 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.use_global_stats = False
-    config.network.sync_bn = True
+    config.network.use_global_stats = True
+    config.network.sync_bn = False
 
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
-    train_net(config)
-    # demo_net(config)
+    if args.demo:
+        demo_net(config)
+    else:
+        train_net(config)
 
 
 def demo_net(config):
