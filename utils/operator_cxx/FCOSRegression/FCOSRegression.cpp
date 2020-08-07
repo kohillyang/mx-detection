@@ -19,8 +19,7 @@ MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int 
 
     const int ch_l=0, ch_t=1, ch_r=2, ch_b=3;
     int ch_center_ness = 4;
-    // channel 5 is the probability of the background class.
-    int ch_cls_start = 6;
+    int ch_cls_start = 5;
     int ch_cls_end = feature_ch;
 
     int n_bbox = 0;

@@ -14,6 +14,9 @@ except ImportError:
 import cv2
 import mxnet as mx
 from .bbox_dataset import DetectionDataset
+from PIL import Image
+
+
 class VOCDetection(DetectionDataset):
     """Pascal VOC detection Dataset.
 
@@ -133,6 +136,11 @@ class VOCDetection(DetectionDataset):
         """Preload all labels into memory."""
         logging.debug("Preloading %s labels into memory...", str(self))
         return [self._load_label(idx) for idx in range(len(self))]
+
+    def at_ratio(self, idx):
+        img_path, bbox = self.at_with_image_path(idx)
+        w, h = Image.open(img_path).size
+        return 1.0 * w / h
 
     def __getitem__(self, idx):
         img_path, bbox = self.at_with_image_path(idx)

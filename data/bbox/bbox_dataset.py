@@ -282,6 +282,7 @@ class AspectGroupingDataset(object):
             idx_mapped = self.aspects_argsort[idx * self.batch_size + i]
             image, bbox = self.base_dataset[idx_mapped]
             image, bbox = self.transformer(image, bbox)
+            bbox = bbox[:, :5]
             images_list.append(image)
             bboxes_list.append(bbox)
         # pad = lambda x: x if x % 128 == 0 else x + 128 - x % 128

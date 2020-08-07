@@ -254,25 +254,15 @@ def train_net(config):
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
-    train_transforms = bbox_t.Compose([
-        # Flipping is implemented in dataset.
-        bbox_t.ResizePad(dst_h=config.TRAIN.PAD_H, dst_w=config.TRAIN.PAD_W),
-        bbox_t.FCOSTargetGenerator(config)
-    ])
-    from data.bbox.mscoco import COCODetection
+    from data.bbox.voc import VOCDetection
     if config.TRAIN.aspect_grouping:
-        coco_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                           h_flip=config.TRAIN.FLIP, transform=None)
-        train_dataset = AspectGroupingDataset(coco_train_dataset, config)
-        for _ in train_dataset:
-            pass
+        voc_dataset = VOCDetection(root=config.dataset.dataset_path, splits=((2007, 'trainval'), (2012, 'trainval')),
+                                   preload_label=False)
+        train_dataset = AspectGroupingDataset(voc_dataset, config)
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
                                                 num_workers=8, last_batch="discard", shuffle=True, thread_pool=False)
     else:
-        train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                      h_flip=config.TRAIN.FLIP, transform=train_transforms)
-        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
-                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
+        assert False
 
     params_all = net.collect_params()
     params_to_train = {}
@@ -439,8 +429,8 @@ def train_net(config):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='QwQ')
-    parser.add_argument('--dataset-root', help='coco dataset root contains annotations, train2017 and val2017.',
-                            required=False, type=str, default="/data1/coco")
+    parser.add_argument('--dataset-root', help='coco dataset root',
+                            required=False, type=str, default="/data1/voc/VOCdevkit")
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
     args = parser.parse_args()
     return args
@@ -462,7 +452,7 @@ def main():
     config.use_hvd = False
 
     config.dataset = easydict.EasyDict()
-    config.dataset.NUM_CLASSES = 81  # with one background
+    config.dataset.NUM_CLASSES = 21  # with one background
     config.dataset.dataset_path = args.dataset_root
 
     config.FCOS = easydict.EasyDict()
@@ -490,7 +480,7 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [16, 20]
+    config.TRAIN.lr_step = [5, 6]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
@@ -505,8 +495,8 @@ def main():
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
     logging.info(msg)
-    # train_net(config)
-    demo_net(config)
+    train_net(config)
+    # demo_net(config)
 
 
 def inference_one_image(net, ctx, image_path):

@@ -41,4 +41,4 @@ class FCOSRegression:
         # one channel for centerness
         # No. of classes channels for class id,
         # 6 + 81 channels in total, if coco dataset is used.
-        return in_shape, [(nbatch, h * w * (c-1-5), 6)]
+        return in_shape, [(nbatch, h * w * (c-5), 6)]
