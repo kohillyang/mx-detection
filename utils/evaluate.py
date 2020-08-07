@@ -23,10 +23,12 @@ def evaluate_coco(json_label, json_predict, classes=COCODetection.CLASSES):
     filename2imgid = {entry["file_name"]: entry["id"] for entry in imgs}
     submit_validataion = json.load(open(args.predict, "rt"), encoding="utf-8")["results"]
     coco_results = []
+    image_ids = []
     for onefile in submit_validataion:
         # {"image_id":42,"category_id":18,"bbox":[258.15,41.29,348.26,243.78],"score":0.236}
         filename = onefile["filename"]
         for rect in onefile["rects"]:
+            image_ids.append(filename2imgid[filename])
             coco_results.append({"image_id": filename2imgid[filename],
                                  "category_id": cat_name2id[classes[rect["label"] - 1]],
                                  "bbox": [rect["xmin"], rect["ymin"], rect["xmax"] - rect["xmin"] + 1,
@@ -35,7 +37,7 @@ def evaluate_coco(json_label, json_predict, classes=COCODetection.CLASSES):
                                  })
     json.dump(coco_results, open("output/tmp.json", "wt"))
     cocoEval = COCOeval(cocoGt, cocoGt.loadRes("output/tmp.json"), "bbox")
-    cocoEval.params.imgIds = imgIds
+    cocoEval.params.imgIds = image_ids
     mAP_eachclasses = {}
     # for catId in catIds:
     #     print(u"Evaluate %s" % (catid2catbane[catId]))

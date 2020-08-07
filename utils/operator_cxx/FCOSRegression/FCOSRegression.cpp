@@ -2,7 +2,7 @@
  * author: kohill
  */
 #include "mobula_op.h"
-
+#include <iostream>
 namespace mobula {
 
 #define UNUSED(expr) do { (void)(expr); } while (0)
@@ -24,7 +24,6 @@ MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int 
 
     int n_bbox = 0;
 
-    
     for(int f_w=0; f_w < feature_w; f_w++){
         for(int f_h=0; f_h < feature_h; f_h ++){
             T ori_x = f_w * stride + static_cast<T>(stride) / 2;
@@ -37,11 +36,12 @@ MOBULA_FUNC void fcos_target_regression(const T *prediction, int feature_n, int 
             T pred_y0 = ori_y - delta_t;
             T pred_x1 = ori_x + delta_r;
             T pred_y1 = ori_y + delta_b;
+            T centerness_score = *(prediction + ch_center_ness * feature_h * feature_w + f_h * feature_w + f_w);
 
             for(int class_id=ch_cls_start; class_id<ch_cls_end; class_id++){
-                T centerness_score = *(prediction + ch_center_ness * feature_h * feature_w + f_h * feature_w + f_w);
                 T class_score = *(prediction + class_id * feature_h * feature_w + f_h * feature_w + f_w);
                 T score_used_for_ranking = centerness_score * class_score;
+//                std::cout << class_score << " " << centerness_score << std::endl;
                 UNUSED(score_used_for_ranking);
                 output[n_bbox*6 + 0] = pred_x0;             
                 output[n_bbox*6 + 1] = pred_y0;             

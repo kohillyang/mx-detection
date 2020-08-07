@@ -519,12 +519,12 @@ def inference_one_image(net, ctx, image_path):
         stride = image_padded.shape[0] // pred.shape[2]
 
         pred[:, :4] = (pred[:, :4]).exp()
-        pred[:, 5] = pred[:, 5].sigmoid()
+        pred[:, 4] = pred[:, 4].sigmoid()
         pred[:, 5:] = pred[:, 5:].sigmoid()
 
         pred_np = pred.asnumpy()
         rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
-        rois = rois[np.where(rois[:, 4] > 0.001)]
+        rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
         bboxes_pred_list.append(rois)
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
     if len(bboxes_pred > 0):
@@ -532,10 +532,10 @@ def inference_one_image(net, ctx, image_path):
                                          overlap_thresh=.5, coord_start=0, score_index=4, id_index=-1,
                                          force_suppress=True, in_format='corner',
                                          out_format='corner').asnumpy()
-        cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.001)]
+        cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
         cls_dets[:, :4] /= fscale
         # gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-        #                             thresh=0.5, class_names=gluoncv.data.COCODetection.CLASSES)
+        #                             thresh=0.2, class_names=gluoncv.data.COCODetection.CLASSES)
         # plt.show()
         cls_dets[:, 5] += 1
         return cls_dets
