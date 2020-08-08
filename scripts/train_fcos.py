@@ -547,9 +547,9 @@ def inference_one_image(net, ctx, image_path):
                                          out_format='corner').asnumpy()
         cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
         cls_dets[:, :4] /= fscale
-        gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-                                    thresh=0.2, class_names=gluoncv.data.VOCDetection.CLASSES)
-        plt.show()
+        # gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
+        #                             thresh=0.2, class_names=gluoncv.data.COCODetection.CLASSES)
+        # plt.show()
         cls_dets[:, 5] += 1
         return cls_dets
     else:
@@ -560,14 +560,14 @@ def demo_net(config):
     import json
     from utils.evaluate import evaluate_coco
     import tqdm
-    ctx_list = [mx.gpu(3)]
+    ctx_list = [mx.gpu()]
     backbone = FPNResNetV1(sync_bn=True, num_devices=3, use_global_stats=True)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("output/voc/focal_alpha_gamma_lr_0.00375/5.params")
+    net.collect_params().load("/data1/kohill/mx-detection/output/focal_alpha_gamma_lr_0.00375/3-300000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     results = {}
     results["results"] = []
-    for x, y, names in os.walk("/data1/voc/VOCdevkit/VOC2012/JPEGImages"):
+    for x, y, names in os.walk("/data1/coco/val2017"):
         for name in tqdm.tqdm(names[:100]):
             one_img = {}
             one_img["filename"] = os.path.basename(name)
