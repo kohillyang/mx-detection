@@ -383,7 +383,7 @@ def main():
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
-    config.TRAIN.log_path = "output/{}/adam_focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
+    config.TRAIN.log_path = "output/{}/RetinaNet-hflip".format(config.dataset.dataset_type, config.TRAIN.lr)
     config.TRAIN.log_interval = 1000
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
@@ -395,7 +395,7 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [6, 8]
+    config.TRAIN.lr_step = [32, 40]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None

@@ -73,7 +73,7 @@ class VOCDetection(DetectionDataset):
         return type(self).CLASSES
 
     def __len__(self):
-        return len(self._items)
+        return len(self._items) * 2
 
     def at_with_image_path(self, idx):
         img_id = self._items[idx]
@@ -138,13 +138,19 @@ class VOCDetection(DetectionDataset):
         return [self._load_label(idx) for idx in range(len(self))]
 
     def at_ratio(self, idx):
-        img_path, bbox = self.at_with_image_path(idx)
+        img_path, bbox = self.at_with_image_path(idx % len(self._items))
         w, h = Image.open(img_path).size
         return 1.0 * w / h
 
     def __getitem__(self, idx):
-        img_path, bbox = self.at_with_image_path(idx)
+        img_path, bbox = self.at_with_image_path(idx % len(self._items))
+        bbox = bbox.copy()
         img = cv2.imread(img_path)[:, :, ::-1]
+        if idx >= len(self._items):
+            img = img[:, ::-1, :]
+            w = img.shape[1]
+            bbox[:, (0, 2)] = w - 1 - bbox[:, (2, 0)]
+
         if self._transform is not None:
             r = self._transform(img, bbox)
         else:
