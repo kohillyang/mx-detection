@@ -422,7 +422,7 @@ def demo_net(config):
     ctx_list = [mx.cpu(0)]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    net.collect_params().load("output/voc/adam_focal_alpha_gamma_lr_0.005/0.params")
+    net.collect_params().load("output/voc/adam_focal_alpha_gamma_lr_0.0025/10.params")
     net.collect_params().reset_ctx(ctx_list[0])
     for x, y, z in os.walk("/data1/voc/VOCdevkit/VOC2012/JPEGImages"):
         for name in z:
@@ -442,8 +442,8 @@ def demo_net(config):
                 reg_prediction = fpn_prediction[:, :4 * num_anchors, :, :].transpose((0, 2, 3, 1)).reshape((0, 0, 0, num_anchors, -1))
                 cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape((0, 0, 0, num_anchors, -1)).sigmoid()
                 fpn_prediction_reshaped = mx.nd.concat(reg_prediction, cls_prediction, dim=4)
-                plt.imshow(fpn_prediction_reshaped[:, :, :, :, 4:][0].max(axis=2).max(axis=2).asnumpy())
-                plt.show()
+                # plt.imshow(fpn_prediction_reshaped[:, :, :, :, 4:][0].max(axis=2).max(axis=2).asnumpy())
+                # plt.show()
                 fpn_prediction_reshaped_np = fpn_prediction_reshaped.asnumpy()
                 fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
                 rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
@@ -454,21 +454,19 @@ def demo_net(config):
                                                                    feature=fpn_prediction_reshaped_np)
                 # plt.imshow(fpn_prediction_reshaped_np[0, :, :, :, 4:].max(axis=2).max(axis=2))
                 # plt.show()
-                print(rois.shape)
                 rois = rois[0]
-                rois = rois[np.where(rois[:, 4] > 0.8)]
-                print(rois.shape)
+                rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
                 bboxes_pred_list.append(rois)
             bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
             cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
                                           overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
                                           force_suppress=True, in_format='corner',
                                           out_format='corner').asnumpy()
-            cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.95)]
+            cls_dets = cls_dets[np.argsort(-1 * cls_dets[:, 4])[:10]]
             # cls_dets = bboxes_pred
 
             gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-                                        thresh=0)
+                                        thresh=0.05)
             plt.show()
             pass
 

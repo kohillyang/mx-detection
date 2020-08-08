@@ -22,7 +22,7 @@ MOBULA_FUNC void retinanet_regression(const int image_h, const int image_w,
 	assert(anchors_base_wh_size==n_anchor);
 	int number_of_classes = n_ch - 4; // 4 reg, and others are for classification.
 	for (int n_image=0; n_image < n_batch; ++n_image){
-		T * bbox_imgae_base = output + n_image * feature_h * feature_w * n_anchor * 5;
+		T * bbox_imgae_base = output + n_image * feature_h * feature_w * n_anchor * 6;
 		const T * feature_imgae_base = feature + n_image * feature_h * feature_w * n_anchor * n_ch;
 		int nbbox = 0;
 	    for(int f_w=0; f_w < feature_w; f_w++){
