@@ -296,8 +296,8 @@ def train_net(config):
                         cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_cls)
 
                         # Todo: beta should be 1/9 here, but it seems that beta can't be set...
-                        loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / 4 / number_positive[:, :, None, None, None]
-                        loss_cls = BCEFocalLoss(cls_prediction, label_for_cls).sum(axis=4) * mask_for_cls / number_positive[:, :, None, None]
+                        loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / 4 / (mask_for_reg.sum() + 1)
+                        loss_cls = BCEFocalLoss(cls_prediction, label_for_cls).sum(axis=4) * mask_for_cls / (mask_for_reg.sum() + 1)
                         losses.append(loss_loc)
                         losses.append(loss_cls)
 
@@ -395,7 +395,7 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [32, 40]
+    config.TRAIN.lr_step = [12, 14]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None

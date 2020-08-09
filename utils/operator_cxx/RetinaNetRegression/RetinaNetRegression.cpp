@@ -1,7 +1,6 @@
 /*
  * author: kohill
  */
-#include "bilinear.h"
 #include "mobula_op.h"
 #include <memory>
 #include <algorithm>
