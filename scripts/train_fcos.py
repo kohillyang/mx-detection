@@ -219,32 +219,16 @@ class FCOSTargetGenerator(object):
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
         outputs = [image_transposed]
-        # fig, axes = plt.subplots(3, 3)
-        # axes = axes.reshape(-1)
-        # n_axes = 0
-        num_pos = 0
+        targets = []
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
-
-            num_pos += target[:, :, 0].sum()
-            # fig, axes = plt.subplots(1, 3)
-            # axes[0].imshow(target[:, :, 1:5].max(axis=2))
-            # axes[1].imshow(target[:, :, 0])
-            # axes[2].imshow(target[:, :, 5])
-            # plt.show()
             target = target.transpose((2, 0, 1))
-            # axes[n_axes].imshow(target[6:].max(axis=0))
-            # n_axes += 1
-            outputs.append(target)
-        num_pos = max(num_pos, 1)
-        outputs.append(np.array([num_pos])[np.newaxis, np.newaxis])
-        # axes[n_axes].imshow(image_transposed.astype(np.uint8))
-        # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
-        # plt.show()
+            target = target.reshape((target.shape[0], -1))
+            targets.append(target)
+        targets = np.concatenate(targets, axis=1)
+        outputs.append(targets)
         outputs = tuple(mx.nd.array(x) for x in outputs)
-        if self.config.TRAIN.USE_FP16:
-            outputs = tuple(x.astype("float16") for x in outputs)
         return outputs
 
 
@@ -386,33 +370,22 @@ def train_net(config):
         net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
-            label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
-            label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx_list, batch_axis=0)
-            label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx_list, batch_axis=0)
-            label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx_list, batch_axis=0)
-            label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx_list, batch_axis=0)
-            number_of_positive_list = mx.gluon.utils.split_and_load(data_batch[6], ctx_list=ctx_list, batch_axis=0)
+            targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
 
             losses = []
             losses_loc = []
             losses_center_ness = []
             losses_cls=[]
             with ag.record():
-                for data, label0, label1, label2, label3, label4, no_pos in zip(data_list, label_0_list,
-                                                                        label_1_list, label_2_list, label_3_list,
-                                                                        label_4_list, number_of_positive_list
-                                                                        ):
-                    labels = [label0, label1, label2, label3, label4]
-                    labels = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in labels], dim=2)
+                for data, targets in zip(data_list, targets_list):
                     fpn_predictions = net(data)
                     preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
-                    num_pos = labels[:, 6:].max(axis=1).sum()
-
-                    reg_mask = labels[:, 0]
-                    iou_loss = mx.nd.where(reg_mask, IoULoss()(preds[:, :4], labels[:, 1:5]),
-                                            mx.nd.zeros_like(reg_mask)) * labels[:, 5] / (labels[:, 5].sum() + 1)
-                    loss_center = BCELoss(preds[:, 4], labels[:, 5]) * labels[:, 0] / num_pos
-                    loss_cls = BCEFocalLoss(preds[:, 5:], labels[:, 6:]) / num_pos
+                    num_pos = targets[:, 6:].max(axis=1).sum()
+                    reg_mask = targets[:, 0]
+                    iou_loss = mx.nd.where(reg_mask, IoULoss()(preds[:, :4], targets[:, 1:5]),
+                                            mx.nd.zeros_like(reg_mask)) * targets[:, 5] / (targets[:, 5].sum() + 1)
+                    loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
+                    loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
                     losses.append(iou_loss)
                     losses.append(loss_cls)
                     losses.append(loss_center)
@@ -504,11 +477,11 @@ def main():
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/{}/focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
-    config.TRAIN.log_interval = 20
+    config.TRAIN.log_interval = 1000
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1333
+    config.TRAIN.image_max_long_size = 1000
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
