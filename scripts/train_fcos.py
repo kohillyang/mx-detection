@@ -396,7 +396,7 @@ def train_net(config):
                     losses_loc.append(iou_loss)
                     losses_center_ness.append(loss_center)
                     losses_cls.append(loss_cls)
-            trainer.step(batch_size)
+            trainer.step(len(ctx_list))
             for l in losses_loc:
                 metric_loss_loc.update(None, l.sum())
             for l in losses_center_ness:
@@ -408,20 +408,6 @@ def train_net(config):
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
                 eval_metrics.reset()
-
-                # plt.imshow(data[0].asnumpy().astype(np.uint8))
-                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
-                #
-                # plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy().astype(np.float32))
-                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
-                # plt.imshow(class_target[0].max(axis=0).asnumpy().astype(np.float32))
-                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
-                #
-                # plt.imshow(loc_prediction[0, 0].asnumpy().astype(np.float32))
-                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_bexp.jpg".format(trainer.optimizer.num_update)))
-                #
-                # plt.imshow(loc_prediction[0, 0].exp().asnumpy().astype(np.float32))
-                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
             if trainer.optimizer.num_update % 5000 == 0:
                 save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
                 net.collect_params().save(save_path)
@@ -454,7 +440,7 @@ def main():
     os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
     os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
     os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
-    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
 
     config = easydict.EasyDict()
