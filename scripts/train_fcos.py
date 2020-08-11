@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import logging
 import os
+os.environ["DMLC_LOG_STACK_TRACE_DEPTH"]="10"
 import pprint
 import sys
 
@@ -241,10 +242,6 @@ def train_net(config):
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    if config.TRAIN.USE_FP16:
-        net.cast("float16")
-        from mxnet.contrib import amp
-        amp.init()
     if config.use_hvd:
         import horovod.mxnet as hvd
         hvd.init()
@@ -280,8 +277,11 @@ def train_net(config):
         logging.info("loaded resume from {}".format(config.TRAIN.resume))
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
-
-
+    if config.TRAIN.USE_FP16:
+        from mxnet.contrib import amp
+        amp.init()
+        net.cast("float16")
+        net.collect_params('.*batchnorm.*').setattr('dtype', 'float32')
     if config.TRAIN.aspect_grouping:
         if config.dataset.dataset_type == "coco":
             from data.bbox.mscoco import COCODetection
@@ -348,7 +348,9 @@ def train_net(config):
              'clip_gradient': None,
              'lr_scheduler': lr_scheduler,
              'multi_precision': True,
-             })
+             },
+            update_on_kvstore=(False if config.TRAIN.USE_FP16 else None), kvstore=mx.kvstore.create('local')
+        )
         if config.TRAIN.USE_FP16:
             amp.init_trainer(trainer)
     # trainer = mx.gluon.Trainer(
@@ -367,12 +369,11 @@ def train_net(config):
         eval_metrics.add(child_metric)
 
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
-        net.hybridize(static_alloc=True, static_shape=False)
+        # net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
             targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
 
-            losses = []
             losses_loc = []
             losses_center_ness = []
             losses_cls=[]
@@ -386,13 +387,15 @@ def train_net(config):
                                             mx.nd.zeros_like(reg_mask)) * targets[:, 5] / (targets[:, 5].sum() + 1)
                     loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
-                    losses.append(iou_loss)
-                    losses.append(loss_cls)
-                    losses.append(loss_center)
+                    loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
+                    if config.TRAIN.USE_FP16:
+                        with amp.scale_loss(loss_total, trainer) as scaled_losses:
+                            ag.backward(scaled_losses)
+                    else:
+                        loss_total.backward()
                     losses_loc.append(iou_loss)
                     losses_center_ness.append(loss_center)
                     losses_cls.append(loss_cls)
-            ag.backward(losses)
             trainer.step(batch_size)
             for l in losses_loc:
                 metric_loss_loc.update(None, l.sum())
@@ -492,7 +495,7 @@ def main():
     config.TRAIN.FLIP = False
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
-    config.TRAIN.USE_FP16 = False
+    config.TRAIN.USE_FP16 = True
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
