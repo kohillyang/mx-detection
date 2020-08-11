@@ -58,7 +58,7 @@ def BCEFocalLossWithoutAlpha(x, target):
     return r
 
 
-def BCEFocalLoss(x, target, alpha, gamma):
+def BCEFocalLoss(x, target):
     alpha = .25
     p = x.sigmoid()
     loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-11)
@@ -205,6 +205,49 @@ def batch_fn(x):
     return x
 
 
+class FCOSTargetGenerator(object):
+    def __init__(self, config):
+        super(FCOSTargetGenerator, self).__init__()
+        self.config = config
+        self.strides = config.FCOS.network.FPN_SCALES
+        self.fpn_min_distance = config.FCOS.network.FPN_MINIMUM_DISTANCES
+        self.fpn_max_distance = config.FCOS.network.FPN_MAXIMUM_DISTANCES
+        self.number_of_classes = config.dataset.NUM_CLASSES
+
+    def __call__(self, image_transposed, bboxes):
+        h, w, c = image_transposed.shape
+        bboxes = bboxes.copy()
+        bboxes[:, 4] += 1
+        outputs = [image_transposed]
+        # fig, axes = plt.subplots(3, 3)
+        # axes = axes.reshape(-1)
+        # n_axes = 0
+        num_pos = 0
+        for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
+            target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
+                image_transposed.astype(np.float32), bboxes.astype(np.float32))
+
+            num_pos += target[:, :, 0].sum()
+            # fig, axes = plt.subplots(1, 3)
+            # axes[0].imshow(target[:, :, 1:5].max(axis=2))
+            # axes[1].imshow(target[:, :, 0])
+            # axes[2].imshow(target[:, :, 5])
+            # plt.show()
+            target = target.transpose((2, 0, 1))
+            # axes[n_axes].imshow(target[6:].max(axis=0))
+            # n_axes += 1
+            outputs.append(target)
+        num_pos = max(num_pos, 1)
+        outputs.append(np.array([num_pos])[np.newaxis, np.newaxis])
+        # axes[n_axes].imshow(image_transposed.astype(np.uint8))
+        # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
+        # plt.show()
+        outputs = tuple(mx.nd.array(x) for x in outputs)
+        if self.config.TRAIN.USE_FP16:
+            outputs = tuple(x.astype("float16") for x in outputs)
+        return outputs
+
+
 def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
@@ -254,11 +297,7 @@ def train_net(config):
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
-    train_transforms = bbox_t.Compose([
-        # Flipping is implemented in dataset.
-        bbox_t.ResizePad(dst_h=config.TRAIN.PAD_H, dst_w=config.TRAIN.PAD_W),
-        bbox_t.FCOSTargetGenerator(config)
-    ])
+
     if config.TRAIN.aspect_grouping:
         if config.dataset.dataset_type == "coco":
             from data.bbox.mscoco import COCODetection
@@ -271,10 +310,15 @@ def train_net(config):
                                               preload_label=False)
         else:
             assert False
-        train_dataset = AspectGroupingDataset(base_train_dataset, config)
+        train_dataset = AspectGroupingDataset(base_train_dataset, config, target_generator=FCOSTargetGenerator(config))
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
-                                                num_workers=8, last_batch="discard", shuffle=True, thread_pool=False)
+                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
     else:
+        train_transforms = bbox_t.Compose([
+            # Flipping is implemented in dataset.
+            bbox_t.ResizePad(dst_h=config.TRAIN.PAD_H, dst_w=config.TRAIN.PAD_W),
+            FCOSTargetGenerator(config)
+        ])
         from data.bbox.mscoco import COCODetection
         train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                       h_flip=config.TRAIN.FLIP, transform=train_transforms)
@@ -359,52 +403,22 @@ def train_net(config):
                                                                         label_4_list, number_of_positive_list
                                                                         ):
                     labels = [label0, label1, label2, label3, label4]
+                    labels = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in labels], dim=2)
                     fpn_predictions = net(data)
-                    for fpn_label, fpn_prediction in zip(labels[::-1], fpn_predictions[::-1]):
-                        mask = fpn_label[:, 0:1]
+                    preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
+                    num_pos = labels[:, 6:].max(axis=1).sum()
 
-                        loc_target = fpn_label[:, 1:5]
-                        centerness_target = fpn_label[:, 5:6]
-                        class_target = fpn_label[:, 6:]
-
-                        # loc_prediction = (stride * fpn_prediction[:, :4])
-                        # loc_prediction = mx.nd.clip(loc_prediction, -10, 10).exp()
-                        loc_prediction = fpn_prediction[:, 0:4]
-                        centerness_prediction = fpn_prediction[:, 4:5]
-                        class_prediction = fpn_prediction[:, 5:]
-
-                        # loss_loc = mx.nd.smooth_l1(loc_prediction-(1+loc_target).log(), scalar=1.0)
-                        iou_loss = IoULoss()(loc_prediction, loc_target) * mask
-                        mask_bd = mx.nd.broadcast_like(mask, iou_loss)
-                        loss_loc = mx.nd.where(mask_bd, iou_loss, mx.nd.zeros_like(mask_bd)) / no_pos
-
-                        # Todo: CrossEntropy Loss-> Focal Loss
-                        # loss_cls = BCEFocalLoss(class_prediction, class_target, alpha=config.TRAIN.cls_focal_loss_alpha,
-                        #                         gamma=config.TRAIN.cls_focal_loss_gamma) / no_pos
-                        loss_cls = BCEFocalLossWithoutAlpha(class_prediction, class_target) / no_pos
-                        # loss_cls = loss_cls.sum(axis=1).reshape((loss_cls.shape[0], -1))
-                        # loss_cls_idx = mx.nd.argsort(loss_cls, axis=1, is_ascend=0)
-                        # loss_cls_idx = losses_cls[:, :256]
-                        # loss_cls = mx.nd.pick(losses_cls, loss_cls_idx)
-                        # print(loss_cls_idx.shape)
-                        loss_centerness = BCELoss(centerness_prediction, centerness_target) * mask / no_pos
-
-                        losses.append(loss_loc)
-                        losses.append(loss_cls)
-                        losses.append(loss_centerness)
-
-                        losses_loc.append(loss_loc)
-                        losses_center_ness.append(loss_centerness)
-                        losses_cls.append(loss_cls)
-                    # def _sum(xx):
-                    #     r = xx[0].sum()
-                    #     for x in xx[1:]:
-                    #         r = r + x.sum()
-                    #     return r
-                    #
-                    # total_loss = _sum(losses)
-                    # with amp.scale_loss(total_loss, trainer) as scaled_losses:
-                    #     ag.backward(scaled_losses)
+                    reg_mask = labels[:, 0]
+                    iou_loss = mx.nd.where(reg_mask, IoULoss()(preds[:, :4], labels[:, 1:5]),
+                                            mx.nd.zeros_like(reg_mask)) * labels[:, 5] / (labels[:, 5].sum() + 1)
+                    loss_center = BCELoss(preds[:, 4], labels[:, 5]) * labels[:, 0] / num_pos
+                    loss_cls = BCEFocalLoss(preds[:, 5:], labels[:, 6:]) / num_pos
+                    losses.append(iou_loss)
+                    losses.append(loss_cls)
+                    losses.append(loss_center)
+                    losses_loc.append(iou_loss)
+                    losses_center_ness.append(loss_center)
+                    losses_cls.append(loss_cls)
             ag.backward(losses)
             trainer.step(batch_size)
             for l in losses_loc:
@@ -419,19 +433,19 @@ def train_net(config):
                 logging.info(msg)
                 eval_metrics.reset()
 
-                plt.imshow(data[0].asnumpy().astype(np.uint8))
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
-
-                plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy().astype(np.float32))
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
-                plt.imshow(class_target[0].max(axis=0).asnumpy().astype(np.float32))
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
-
-                plt.imshow(loc_prediction[0, 0].asnumpy().astype(np.float32))
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_bexp.jpg".format(trainer.optimizer.num_update)))
-
-                plt.imshow(loc_prediction[0, 0].exp().asnumpy().astype(np.float32))
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
+                # plt.imshow(data[0].asnumpy().astype(np.uint8))
+                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
+                #
+                # plt.imshow(class_prediction[0].sigmoid().max(axis=0).asnumpy().astype(np.float32))
+                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
+                # plt.imshow(class_target[0].max(axis=0).asnumpy().astype(np.float32))
+                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
+                #
+                # plt.imshow(loc_prediction[0, 0].asnumpy().astype(np.float32))
+                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_bexp.jpg".format(trainer.optimizer.num_update)))
+                #
+                # plt.imshow(loc_prediction[0, 0].exp().asnumpy().astype(np.float32))
+                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
             if trainer.optimizer.num_update % 5000 == 0:
                 save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
                 net.collect_params().save(save_path)
@@ -485,16 +499,16 @@ def main():
     config.TRAIN = easydict.EasyDict()
     config.TRAIN.batch_size = 2 * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
-    config.TRAIN.warmup_lr = 0.0025
+    config.TRAIN.warmup_lr = config.TRAIN.lr
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/{}/focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
-    config.TRAIN.log_interval = 100
+    config.TRAIN.log_interval = 20
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 600
-    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.image_short_size = 800
+    config.TRAIN.image_max_long_size = 1333
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
@@ -502,7 +516,7 @@ def main():
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
     config.TRAIN.lr_step = [16, 20]
-    config.TRAIN.FLIP = True
+    config.TRAIN.FLIP = False
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
     config.TRAIN.USE_FP16 = False
@@ -510,8 +524,8 @@ def main():
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.use_global_stats = False
-    config.network.sync_bn = True
+    config.network.use_global_stats = True
+    config.network.sync_bn = False
     os.makedirs(config.TRAIN.log_path, exist_ok=True)
     log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
     msg = pprint.pformat(config)
@@ -560,10 +574,10 @@ def demo_net(config):
     import json
     from utils.evaluate import evaluate_coco
     import tqdm
-    ctx_list = [mx.gpu()]
+    ctx_list = [mx.gpu(3)]
     backbone = FPNResNetV1(sync_bn=True, num_devices=3, use_global_stats=True)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("/data1/kohill/mx-detection/output/focal_alpha_gamma_lr_0.00375/3-300000.params")
+    net.collect_params().load("/data1/kohill/mx-detection/output/focal_alpha_gamma_lr_0.00375/11-610000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     results = {}
     results["results"] = []

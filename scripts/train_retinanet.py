@@ -419,10 +419,10 @@ def demo_net(config):
     import gluoncv
     backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus), use_global_stats=config.network.use_global_stats)
     # ctx_list = [mx.gpu(x) for x in config.gpus]
-    ctx_list = [mx.cpu(0)]
+    ctx_list = [mx.gpu(3)]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    net.collect_params().load("output/voc/adam_focal_alpha_gamma_lr_0.0025/10.params")
+    net.collect_params().load("output/coco/RetinaNet-hflip/2-100000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     for x, y, z in os.walk("/data1/voc/VOCdevkit/VOC2012/JPEGImages"):
         for name in z:

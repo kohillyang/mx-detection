@@ -1,7 +1,6 @@
 /*
  * author: kohill
  */
-#include "bilinear.h"
 #include "mobula_op.h"
 #include <memory>
 #include <algorithm>
@@ -70,7 +69,12 @@ const T* bboxes, const int number_of_bboxes, T distance_min, T distance_max, T* 
                 output_base[3] = delta_r;
                 output_base[4] = delta_b;
                 T center_ness = std::min(delta_r, delta_l) * std::min(delta_t, delta_b);
-                center_ness /= std::max(delta_r, delta_l) * std::max(delta_t, delta_b) + 1e-1;
+                T denominator = std::max(delta_r, delta_l) * std::max(delta_t, delta_b);
+                if (denominator > 1e-5){
+                    center_ness /= denominator;
+                }else{
+                    center_ness = 0;
+                }
                 center_ness = std::sqrt(center_ness);
                 output_base[5] = center_ness;
                 assert(6 + class_id -1 < feature_ch);

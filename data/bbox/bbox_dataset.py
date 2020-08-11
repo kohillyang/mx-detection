@@ -267,7 +267,7 @@ class AspectGroupingDataset(object):
         else:
             self.transformer = transformer
         if target_generator is None:
-            self.target_generator = bbox_t.FCOSTargetGenerator(self.config)
+            assert target_generator is not None, "target_generator should be not None."
         else:
             self.target_generator = target_generator
         self.batch_size = config.TRAIN.batch_size

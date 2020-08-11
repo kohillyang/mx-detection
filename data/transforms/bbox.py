@@ -344,45 +344,6 @@ class AssignPyramidAnchor(object):
         bbox_weight = nd.array(label_dict["bbox_weight"])
         return data, im_info, gt_boxes, label, bbox_target, bbox_weight
 
-import matplotlib.pyplot as plt
-import gluoncv
-class FCOSTargetGenerator(object):
-    def __init__(self, config):
-        super(FCOSTargetGenerator, self).__init__()
-        self.config = config
-        self.strides = config.FCOS.network.FPN_SCALES
-        self.fpn_min_distance = config.FCOS.network.FPN_MINIMUM_DISTANCES
-        self.fpn_max_distance = config.FCOS.network.FPN_MAXIMUM_DISTANCES
-        self.number_of_classes = config.dataset.NUM_CLASSES
-
-    def __call__(self, image_transposed, bboxes):
-        h, w, c = image_transposed.shape
-        bboxes = bboxes.copy()
-        bboxes[:, 4] += 1
-        outputs = [image_transposed]
-        # fig, axes = plt.subplots(3, 3)
-        # axes = axes.reshape(-1)
-        # n_axes = 0
-        num_pos = 0
-        for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
-            target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
-                image_transposed.astype(np.float32), bboxes.astype(np.float32))
-
-            num_pos += target[:, :, 0].sum()
-            target = target.transpose((2, 0, 1))
-            # axes[n_axes].imshow(target[6:].max(axis=0))
-            # n_axes += 1
-            outputs.append(target)
-        num_pos = max(num_pos, 1)
-        outputs.append(np.array([num_pos])[np.newaxis, np.newaxis])
-        # axes[n_axes].imshow(image_transposed.astype(np.uint8))
-        # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
-        # plt.show()
-        outputs = tuple(mx.nd.array(x) for x in outputs)
-        if self.config.TRAIN.USE_FP16:
-            outputs = tuple(x.astype("float16") for x in outputs)
-        return outputs
-
 
 class Compose(object):
     def __init__(self, transforms=()):
