@@ -381,10 +381,9 @@ def train_net(config):
                 for data, targets in zip(data_list, targets_list):
                     fpn_predictions = net(data)
                     preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
-                    num_pos = targets[:, 6:].max(axis=1).sum()
+                    num_pos = targets[:, 0].sum() + 1
                     reg_mask = targets[:, 0]
-                    iou_loss = mx.nd.where(reg_mask, IoULoss()(preds[:, :4], targets[:, 1:5]),
-                                            mx.nd.zeros_like(reg_mask)) * targets[:, 5] / (targets[:, 5].sum() + 1)
+                    iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
                     loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
@@ -466,7 +465,7 @@ def main():
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
-    config.TRAIN.log_interval = 1000
+    config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
