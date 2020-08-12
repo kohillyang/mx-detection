@@ -369,7 +369,7 @@ def train_net(config):
         eval_metrics.add(child_metric)
 
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
-        # net.hybridize(static_alloc=True, static_shape=False)
+        net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
             targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
@@ -440,7 +440,7 @@ def main():
     os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
     os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
     os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
 
     config = easydict.EasyDict()
@@ -465,7 +465,7 @@ def main():
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
-    config.TRAIN.log_path = "output/{}/focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
+    config.TRAIN.log_path = "output/{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}".format(config.dataset.dataset_type, config.TRAIN.lr)
     config.TRAIN.log_interval = 1000
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
@@ -477,11 +477,11 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [16, 20]
-    config.TRAIN.FLIP = False
+    config.TRAIN.lr_step = [8, 12]
+    config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
-    config.TRAIN.USE_FP16 = True
+    config.TRAIN.USE_FP16 = False
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
