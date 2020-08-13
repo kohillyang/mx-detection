@@ -367,7 +367,7 @@ def train_net(config):
     eval_metrics = mx.metric.CompositeEvalMetric()
     for child_metric in [metric_loss_loc, metric_loss_cls, metric_loss_center]:
         eval_metrics.add(child_metric)
-
+    mobula.op.load("FocalLoss")
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
@@ -385,7 +385,8 @@ def train_net(config):
                     reg_mask = targets[:, 0]
                     iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
                     loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
-                    loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
+                    # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
+                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=preds[:, 5:], targets=targets[:, 6:]) / num_pos
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
                     if config.TRAIN.USE_FP16:
                         with amp.scale_loss(loss_total, trainer) as scaled_losses:
@@ -478,8 +479,8 @@ def main():
     config.TRAIN.end_epoch = 28
     config.TRAIN.lr_step = [8, 12]
     config.TRAIN.FLIP = True
-    config.TRAIN.resume = None
-    config.TRAIN.trainer_resume = None
+    config.TRAIN.resume = "output/coco/reg_weighted_by_centerness_focal_alpha_gamma_lr_0.005/3.params"
+    config.TRAIN.trainer_resume = "output/coco/reg_weighted_by_centerness_focal_alpha_gamma_lr_0.005/3.params-trainer.states"
     config.TRAIN.USE_FP16 = False
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
