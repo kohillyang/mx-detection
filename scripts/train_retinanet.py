@@ -148,7 +148,7 @@ class RetinaNetTargetGenerator(object):
                 axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
                 n_axes += 1
             # target = np.transpose(target.reshape((target.shape[0], target.shape[1], -1)), (2, 0, 1))
-            target = target.transpose((3, 0, 1, 2))
+            target = target.transpose((3, 2, 0, 1))
             target = target.reshape((target.shape[0], -1))
             targets.append(target)
         if self._debug_show_fig:
@@ -279,7 +279,7 @@ def train_net(config):
             with ag.record():
                 for data, targets in zip(data_list, targets_list):
                     fpn_predictions = net(data)
-                    fpn_predictions = [x.reshape(2, -1, num_anchors * x.shape[2] * x.shape[3]) for x in fpn_predictions]
+                    fpn_predictions = [x.reshape(x.shape[0], -1, num_anchors * x.shape[2] * x.shape[3]) for x in fpn_predictions]
                     fpn_predictions = mx.nd.concat(*fpn_predictions, dim=2)
                     mask_for_cls = targets[:, 0:1]
                     mask_for_reg = targets[:, 1:2]
@@ -362,7 +362,7 @@ def main():
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/{}/RetinaNet-hflip".format(config.dataset.dataset_type, config.TRAIN.lr)
-    config.TRAIN.log_interval = 1000
+    config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 600
