@@ -138,24 +138,25 @@ class RetinaNetTargetGenerator(object):
             fig, axes = plt.subplots(3, 3)
             axes = axes.reshape(-1)
             n_axes = 0
-        num_positive_samples = 0
+        targets = []
         for stride, base_size in zip(self.strides, self.base_sizes):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
             target[:, :, :, 1:5] /= np.array(self.bbox_norm_coef)[None, None, None]
-            num_positive_samples += target[:, :, :, 1].sum()
             if self._debug_show_fig:
                 axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
                 n_axes += 1
             # target = np.transpose(target.reshape((target.shape[0], target.shape[1], -1)), (2, 0, 1))
-            outputs.append(target)
-        num_positive_samples = max(1, num_positive_samples)
-        outputs.append(np.array([num_positive_samples]))
+            target = target.transpose((3, 0, 1, 2))
+            target = target.reshape((target.shape[0], -1))
+            targets.append(target)
         if self._debug_show_fig:
             axes[n_axes].imshow(image_transposed.astype(np.uint8))
             gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
             plt.show()
+        targets = np.concatenate(targets, axis=1)
+        outputs.append(targets)
         outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
 
@@ -266,46 +267,34 @@ def train_net(config):
     eval_metrics = mx.metric.CompositeEvalMetric()
     for child_metric in [metric_loss_loc, metric_loss_cls]:
         eval_metrics.add(child_metric)
-
+    mobula.op.load("FocalLoss")
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         net.hybridize(static_alloc=True, static_shape=False)
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
-            label_0_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
-            label_1_list = mx.gluon.utils.split_and_load(data_batch[2], ctx_list=ctx_list, batch_axis=0)
-            label_2_list = mx.gluon.utils.split_and_load(data_batch[3], ctx_list=ctx_list, batch_axis=0)
-            label_3_list = mx.gluon.utils.split_and_load(data_batch[4], ctx_list=ctx_list, batch_axis=0)
-            label_4_list = mx.gluon.utils.split_and_load(data_batch[5], ctx_list=ctx_list, batch_axis=0)
-            number_positive_list = mx.gluon.utils.split_and_load(data_batch[6], ctx_list=ctx_list, batch_axis=0)
+            targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
             losses = []
             losses_loc = []
-            losses_cls=[]
+            losses_cls = []
             with ag.record():
-                for data, label0, label1, label2, label3, label4, number_positive in zip(data_list, label_0_list,
-                                                                        label_1_list, label_2_list, label_3_list,
-                                                                        label_4_list, number_positive_list
-                                                                        ):
-                    labels = [label0, label1, label2, label3, label4]
+                for data, targets in zip(data_list, targets_list):
                     fpn_predictions = net(data)
-                    for fpn_label, fpn_prediction in zip(labels[::-1], fpn_predictions[::-1]):
-                        mask_for_cls = fpn_label[:, :, :, :, 0]
-                        mask_for_reg = fpn_label[:, :, :, :, 1:2]
-                        label_for_reg = fpn_label[:, :, :, :, 2:6]
-                        label_for_cls = fpn_label[:, :, :, :, 6:]
-                        reg_prediction = fpn_prediction[:, :4 * num_anchors, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_reg)
-                        cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape_like(label_for_cls)
+                    fpn_predictions = [x.reshape(2, -1, num_anchors * x.shape[2] * x.shape[3]) for x in fpn_predictions]
+                    fpn_predictions = mx.nd.concat(*fpn_predictions, dim=2)
+                    mask_for_cls = targets[:, 0:1]
+                    mask_for_reg = targets[:, 1:2]
+                    num_pos = (mask_for_reg.sum() + 1)
+                    loss_loc = mx.nd.smooth_l1(fpn_predictions[:, :4] - targets[:, 2:6]) * mask_for_reg / 4 / num_pos
+                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=fpn_predictions[:, 4:],
+                                                   targets=targets[:, 6:]) * mask_for_cls / num_pos
+                    losses.append(loss_loc)
+                    losses.append(loss_cls)
 
-                        # Todo: beta should be 1/9 here, but it seems that beta can't be set...
-                        loss_loc = mx.nd.smooth_l1(reg_prediction - label_for_reg) * mask_for_reg / 4 / (mask_for_reg.sum() + 1)
-                        loss_cls = BCEFocalLoss(cls_prediction, label_for_cls).sum(axis=4) * mask_for_cls / (mask_for_reg.sum() + 1)
-                        losses.append(loss_loc)
-                        losses.append(loss_cls)
-
-                        losses_loc.append(loss_loc)
-                        losses_cls.append(loss_cls)
+                    losses_loc.append(loss_loc)
+                    losses_cls.append(loss_cls)
 
             ag.backward(losses)
-            trainer.step(batch_size)
+            trainer.step(len(ctx_list))
             for l in losses_loc:
                 metric_loss_loc.update(None, l.sum())
             for l in losses_cls:
@@ -316,17 +305,6 @@ def train_net(config):
                 logging.info(msg)
                 eval_metrics.reset()
 
-                plt.imshow(data[0].asnumpy().astype(np.uint8))
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_image.jpg".format(trainer.optimizer.num_update)))
-
-                plt.imshow(cls_prediction[0].sigmoid().max(axis=2).max(axis=2).asnumpy())
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap.jpg".format(trainer.optimizer.num_update)))
-
-                plt.imshow(label_for_cls[0].sigmoid().max(axis=2).max(axis=2).asnumpy())
-                plt.savefig(os.path.join(config.TRAIN.log_path, "{}_heatmap_target.jpg".format(trainer.optimizer.num_update)))
-
-                # plt.imshow(reg_prediction[0, 0, ].exp().asnumpy())
-                # plt.savefig(os.path.join(config.TRAIN.log_path, "{}_exp.jpg".format(trainer.optimizer.num_update)))
             if trainer.optimizer.num_update % 5000 == 0:
                 save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
                 net.collect_params().save(save_path)
