@@ -149,13 +149,13 @@ class RetinaNetTargetGenerator(object):
                 n_axes += 1
             # target = np.transpose(target.reshape((target.shape[0], target.shape[1], -1)), (2, 0, 1))
             target = target.transpose((3, 2, 0, 1))
-            target = target.reshape((target.shape[0], -1))
+            target = target.reshape((target.shape[0], target.shape[1], -1))  # 6 + no. of classes, num_anchors, -1
             targets.append(target)
         if self._debug_show_fig:
             axes[n_axes].imshow(image_transposed.astype(np.uint8))
             gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
             plt.show()
-        targets = np.concatenate(targets, axis=1)
+        targets = np.concatenate(targets, axis=2)
         outputs.append(targets)
         outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
@@ -279,8 +279,8 @@ def train_net(config):
             with ag.record():
                 for data, targets in zip(data_list, targets_list):
                     fpn_predictions = net(data)
-                    fpn_predictions = [x.reshape(x.shape[0], -1, num_anchors * x.shape[2] * x.shape[3]) for x in fpn_predictions]
-                    fpn_predictions = mx.nd.concat(*fpn_predictions, dim=2)
+                    fpn_predictions = [x.reshape(x.shape[0], -1, num_anchors, x.shape[2] * x.shape[3]) for x in fpn_predictions]
+                    fpn_predictions = mx.nd.concat(*fpn_predictions, dim=3)
                     mask_for_cls = targets[:, 0:1]
                     mask_for_reg = targets[:, 1:2]
                     num_pos = (mask_for_reg.sum() + 1)
@@ -365,8 +365,8 @@ def main():
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 600
-    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.image_short_size = 800
+    config.TRAIN.image_max_long_size = 1333
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
@@ -397,12 +397,12 @@ def demo_net(config):
     import gluoncv
     backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus), use_global_stats=config.network.use_global_stats)
     # ctx_list = [mx.gpu(x) for x in config.gpus]
-    ctx_list = [mx.gpu(3)]
+    ctx_list = [mx.cpu()]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    net.collect_params().load("output/coco/RetinaNet-hflip/2-100000.params")
+    net.collect_params().load("scripts/output/coco/RetinaNet-hflip/1-45000.params")
     net.collect_params().reset_ctx(ctx_list[0])
-    for x, y, z in os.walk("/data1/voc/VOCdevkit/VOC2012/JPEGImages"):
+    for x, y, z in os.walk("/data1/coco/val2017"):
         for name in z:
             path = os.path.join(x, name)
             image = cv2.imread(path)[:, :, ::-1]
@@ -412,17 +412,11 @@ def demo_net(config):
             predictions = net(data)
             bboxes_pred_list = []
             num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
+            predictions = [x.reshape(x.shape[0], -1, num_anchors, x.shape[2], x.shape[3]) for x in predictions]
             for fpn_prediction, base_size in zip(predictions, config.retinanet.network.BASE_SIZES):
                 stride = image_padded.shape[0] // fpn_prediction.shape[2]
-                # fpn_prediction_transposed = fpn_prediction.transpose((0, 2, 3, 1))
-                # fpn_prediction_reshaped = fpn_prediction_transposed.reshape((0, 0, 0, num_anchors, -1))
-                # fpn_prediction_reshaped[:, :, :, :, 4:] = fpn_prediction_reshaped[:, :, :, :, 4:].sigmoid()
-                reg_prediction = fpn_prediction[:, :4 * num_anchors, :, :].transpose((0, 2, 3, 1)).reshape((0, 0, 0, num_anchors, -1))
-                cls_prediction = fpn_prediction[:, 4 * num_anchors:, :, :].transpose((0, 2, 3, 1)).reshape((0, 0, 0, num_anchors, -1)).sigmoid()
-                fpn_prediction_reshaped = mx.nd.concat(reg_prediction, cls_prediction, dim=4)
-                # plt.imshow(fpn_prediction_reshaped[:, :, :, :, 4:][0].max(axis=2).max(axis=2).asnumpy())
-                # plt.show()
-                fpn_prediction_reshaped_np = fpn_prediction_reshaped.asnumpy()
+                fpn_prediction[:, 4:] = fpn_prediction[:, 4:].sigmoid()
+                fpn_prediction_reshaped_np = fpn_prediction.transpose((0, 3, 4, 2, 1)).asnumpy()
                 fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
                 rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
                                                                  base_size=base_size,
@@ -444,7 +438,7 @@ def demo_net(config):
             # cls_dets = bboxes_pred
 
             gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-                                        thresh=0.05)
+                                        thresh=0.01)
             plt.show()
             pass
 
