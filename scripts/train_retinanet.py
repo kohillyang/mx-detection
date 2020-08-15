@@ -143,7 +143,7 @@ class RetinaNetTargetGenerator(object):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
-            target[:, :, :, 1:5] /= np.array(self.bbox_norm_coef)[None, None, None]
+            target[:, :, :, 2:6] /= np.array(self.bbox_norm_coef)[None, None, None]
             if self._debug_show_fig:
                 axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
                 n_axes += 1
