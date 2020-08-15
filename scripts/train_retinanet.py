@@ -278,15 +278,18 @@ def train_net(config):
             losses_cls = []
             with ag.record():
                 for data, targets in zip(data_list, targets_list):
+                    # targets: (2, 86, num_anchors, h x w)
                     fpn_predictions = net(data)
-                    fpn_predictions = [x.reshape(x.shape[0], -1, num_anchors, x.shape[2] * x.shape[3]) for x in fpn_predictions]
-                    fpn_predictions = mx.nd.concat(*fpn_predictions, dim=3)
+                    num_reg_channels = num_anchors * 4
+                    cls_fpn_predictions = [x[:, num_reg_channels:].reshape(x.shape[0], -1, num_anchors, x.shape[2] * x.shape[3]) for x in fpn_predictions]
+                    reg_fpn_predictions = [x[:, :num_reg_channels].reshape(x.shape[0], -1, num_anchors, x.shape[2] * x.shape[3]) for x in fpn_predictions]
+                    cls_fpn_predictions = mx.nd.concat(*cls_fpn_predictions, dim=3)
+                    reg_fpn_predictions = mx.nd.concat(*reg_fpn_predictions, dim=3)
                     mask_for_cls = targets[:, 0:1]
                     mask_for_reg = targets[:, 1:2]
                     num_pos = (mask_for_reg.sum() + 1)
-                    loss_loc = mx.nd.smooth_l1(fpn_predictions[:, :4] - targets[:, 2:6]) * mask_for_reg / 4 / num_pos
-                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=fpn_predictions[:, 4:],
-                                                   targets=targets[:, 6:]) * mask_for_cls / num_pos
+                    loss_loc = mx.nd.smooth_l1(reg_fpn_predictions - targets[:, 2:6]) * mask_for_reg / 4 / num_pos
+                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_fpn_predictions, targets=targets[:, 6:]) * mask_for_cls / num_pos
 
                     losses.append(loss_loc)
                     losses.append(loss_cls)
@@ -401,7 +404,7 @@ def demo_net(config):
     ctx_list = [mx.cpu()]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    net.collect_params().load("/media/kk/data/kk/fcos/mx-detection/output/coco/RetinaNet-hflip/1-50000.params")
+    net.collect_params().load("output/coco/RetinaNet-hflip/0-5000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     for x, y, z in os.walk("/data1/coco/val2017"):
         for name in z:
@@ -418,7 +421,7 @@ def demo_net(config):
                 stride = image_padded.shape[0] // fpn_prediction.shape[2]
                 fpn_prediction[:, 4:] = fpn_prediction[:, 4:].sigmoid()
                 fpn_prediction_reshaped_np = fpn_prediction.transpose((0, 3, 4, 2, 1)).asnumpy()
-                fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
+                # fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
                 rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
                                                                  base_size=base_size,
                                                                  cls_threshold=.01,
@@ -439,7 +442,7 @@ def demo_net(config):
             # cls_dets = bboxes_pred
 
             gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-                                        thresh=0.01)
+                                        thresh=0.01, class_names=gluoncv.data.COCODetection.CLASSES)
             plt.show()
             pass
 
