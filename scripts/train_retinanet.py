@@ -143,7 +143,7 @@ class RetinaNetTargetGenerator(object):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
-            target[:, :, :, 1:5] /= np.array(self.bbox_norm_coef)[None, None, None]
+            target[:, :, :, 2:6] /= np.array(self.bbox_norm_coef)[None, None, None]
             if self._debug_show_fig:
                 axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
                 n_axes += 1
@@ -287,6 +287,7 @@ def train_net(config):
                     loss_loc = mx.nd.smooth_l1(fpn_predictions[:, :4] - targets[:, 2:6]) * mask_for_reg / 4 / num_pos
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=fpn_predictions[:, 4:],
                                                    targets=targets[:, 6:]) * mask_for_cls / num_pos
+
                     losses.append(loss_loc)
                     losses.append(loss_cls)
 
@@ -365,7 +366,7 @@ def main():
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 800
+    config.TRAIN.image_short_size = 600
     config.TRAIN.image_max_long_size = 1333
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
@@ -400,7 +401,7 @@ def demo_net(config):
     ctx_list = [mx.cpu()]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    net.collect_params().load("scripts/output/coco/RetinaNet-hflip/1-45000.params")
+    net.collect_params().load("/media/kk/data/kk/fcos/mx-detection/output/coco/RetinaNet-hflip/1-50000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     for x, y, z in os.walk("/data1/coco/val2017"):
         for name in z:
