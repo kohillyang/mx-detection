@@ -1,26 +1,21 @@
-from __future__ import print_function
-
 import logging
 import os
-os.environ["DMLC_LOG_STACK_TRACE_DEPTH"]="10"
 import pprint
 import sys
+import time
 
 import cv2
+import easydict
+import gluoncv
+import matplotlib.pyplot as plt
 import mxnet as mx
 import mxnet.autograd as ag
 import numpy as np
 import tqdm
-import time
-import easydict
-import matplotlib
-import gluoncv
-import matplotlib.pyplot as plt
-from models.fcos.resnet import ResNet
+
+from data.bbox.bbox_dataset import AspectGroupingDataset
 from models.fcos.resnetv1b import FPNResNetV1
 from utils.common import log_init
-from data.bbox.bbox_dataset import AspectGroupingDataset
-from utils.lrsheduler import WarmupMultiFactorScheduler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 import data.transforms.bbox as bbox_t
@@ -427,6 +422,10 @@ def parse_args():
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
     parser.add_argument('--demo', help='demo', action="store_true")
+    args_known = parser.parse_known_args()[0]
+    if args_known.demo:
+        parser.add_argument('--demo-params', help='Params file you want to load for evaluating.', type=str, required=True)
+        parser.add_argument('--viz', help='Whether visualize the results when evaluate on coco.', action="store_true")
 
     args = parser.parse_args()
     return args
@@ -479,8 +478,8 @@ def main():
     config.TRAIN.end_epoch = 28
     config.TRAIN.lr_step = [8, 12]
     config.TRAIN.FLIP = True
-    config.TRAIN.resume = "output/coco/reg_weighted_by_centerness_focal_alpha_gamma_lr_0.005/3.params"
-    config.TRAIN.trainer_resume = "output/coco/reg_weighted_by_centerness_focal_alpha_gamma_lr_0.005/3.params-trainer.states"
+    config.TRAIN.resume = None
+    config.TRAIN.trainer_resume = None
     config.TRAIN.USE_FP16 = False
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
@@ -488,25 +487,27 @@ def main():
     config.network.FIXED_PARAMS = []
     config.network.use_global_stats = True
     config.network.sync_bn = False
-    os.makedirs(config.TRAIN.log_path, exist_ok=True)
-    log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
-    msg = pprint.pformat(config)
-    logging.info(msg)
+
+    config.val = easydict.EasyDict()
     if args.demo:
+        config.val.params_file = args.demo_params
+        config.val.viz = args.viz
         demo_net(config)
     else:
+        os.makedirs(config.TRAIN.log_path, exist_ok=True)
+        log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
+        msg = pprint.pformat(config)
+        logging.info(msg)
         train_net(config)
 
 
-def inference_one_image(net, ctx, image_path):
+def inference_one_image(config, net, ctx, image_path):
     image = cv2.imread(image_path)[:, :, ::-1]
-    fscale = min(600 / min(image.shape[:2]), 1333 / max(image.shape[:2]))
+    fscale = min(config.TRAIN.image_short_size / min(image.shape[:2]), config.TRAIN.image_max_long_size / max(image.shape[:2]))
     image_padded = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
     predictions = net(mx.nd.array(image_padded[np.newaxis], ctx=ctx))
     bboxes_pred_list = []
-    for pred in predictions:
-        stride = image_padded.shape[0] // pred.shape[2]
-
+    for stride, pred in zip(config.FCOS.network.FPN_SCALES, predictions):
         pred[:, :4] = (pred[:, :4]).exp()
         pred[:, 4] = pred[:, 4].sigmoid()
         pred[:, 5:] = pred[:, 5:].sigmoid()
@@ -523,9 +524,10 @@ def inference_one_image(net, ctx, image_path):
                                          out_format='corner').asnumpy()
         cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
         cls_dets[:, :4] /= fscale
-        # gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-        #                             thresh=0.2, class_names=gluoncv.data.COCODetection.CLASSES)
-        # plt.show()
+        if config.val.viz:
+            gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
+                                        thresh=0.2, class_names=gluoncv.data.COCODetection.CLASSES)
+            plt.show()
         cls_dets[:, 5] += 1
         return cls_dets
     else:
@@ -536,19 +538,19 @@ def demo_net(config):
     import json
     from utils.evaluate import evaluate_coco
     import tqdm
-    ctx_list = [mx.gpu(3)]
-    backbone = FPNResNetV1(sync_bn=True, num_devices=3, use_global_stats=True)
+    ctx_list = [mx.gpu(x) for x in config.gpus]
+    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=3, use_global_stats=True)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    net.collect_params().load("/data1/kohill/mx-detection/output/focal_alpha_gamma_lr_0.00375/11-610000.params")
+    net.collect_params().load(config.val.params_file)
     net.collect_params().reset_ctx(ctx_list[0])
     results = {}
     results["results"] = []
-    for x, y, names in os.walk("/data1/coco/val2017"):
-        for name in tqdm.tqdm(names[:100]):
+    for x, y, names in os.walk(os.path.join(config.dataset.dataset_path, "val2017")):
+        for name in tqdm.tqdm(names):
             one_img = {}
             one_img["filename"] = os.path.basename(name)
             one_img["rects"] = []
-            preds = inference_one_image(net, ctx_list[0], os.path.join(x, name))
+            preds = inference_one_image(config, net, ctx_list[0], os.path.join(x, name))
             for i in range(len(preds)):
                 one_rect = {}
                 xmin, ymin, xmax, ymax = preds[i][:4]
@@ -562,7 +564,8 @@ def demo_net(config):
             results["results"].append(one_img)
     save_path = 'results.json'
     json.dump(results, open(save_path, "wt"))
-    evaluate_coco(json_label="/data1/coco/annotations/instances_val2017.json", json_predict=save_path)
+    evaluate_coco(json_label=os.path.join(config.dataset.dataset_path, "annotations/instances_val2017.json"),
+                  json_predict=save_path)
 
 
 if __name__ == '__main__':
