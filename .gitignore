@@ -35,3 +35,5 @@ openmpi-4.0.4.tar.gz
 .pydevproject
 
 utils/operator_cxx/RetinaNetRegression/build/
+
+utils/operator_cxx/HeatGen/build/
