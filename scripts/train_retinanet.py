@@ -139,11 +139,15 @@ class RetinaNetTargetGenerator(object):
             axes = axes.reshape(-1)
             n_axes = 0
         targets = []
+        num_pos = 0
         for stride, base_size in zip(self.strides, self.base_sizes):
             target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
                                                                     stride=stride, base_size=base_size)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
+            num_pos += target[:, :, :, 1].sum()
+
             target[:, :, :, 2:6] /= np.array(self.bbox_norm_coef)[None, None, None]
+
             if self._debug_show_fig:
                 axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
                 n_axes += 1
@@ -156,6 +160,16 @@ class RetinaNetTargetGenerator(object):
             gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
             plt.show()
         targets = np.concatenate(targets, axis=2)
+        if num_pos <= 0:
+            print("num pos is too small, ignore this sample.", num_pos)
+            # fig, axes = plt.subplots(1, 1, squeeze=False)
+            # axes = axes.reshape(-1)
+            # axes[0].imshow(image_transposed.astype(np.uint8))
+            # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[0])
+            # import time
+            # plt.savefig("{}.png".format(time.time()))
+            targets[0, :] = 0
+            targets[1, :] = 0
         outputs.append(targets)
         outputs = tuple(mx.nd.array(x) for x in outputs)
         return outputs
@@ -287,8 +301,9 @@ def train_net(config):
                     reg_fpn_predictions = mx.nd.concat(*reg_fpn_predictions, dim=3)
                     mask_for_cls = targets[:, 0:1]
                     mask_for_reg = targets[:, 1:2]
-                    num_pos = (mask_for_reg.sum() + 1)
-                    loss_loc = mx.nd.smooth_l1(reg_fpn_predictions - targets[:, 2:6]) * mask_for_reg / 4 / num_pos
+                    num_pos = mask_for_reg.sum()
+                    num_pos = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
+                    loss_loc = mx.nd.smooth_l1(reg_fpn_predictions - targets[:, 2:6]) * mask_for_reg / num_pos / 4
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_fpn_predictions, targets=targets[:, 6:]) * mask_for_cls / num_pos
 
                     losses.append(loss_loc)
@@ -336,11 +351,6 @@ def parse_args():
 
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    os.environ['MXNET_GPU_MEM_POOL_ROUND_LINEAR_CUTOFF'] = '26'
-    os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_FWD'] = '999'
-    os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
-    os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
-    os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
 
@@ -377,23 +387,25 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [12, 14]
+    config.TRAIN.lr_step = [6, 8]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.use_global_stats = True
-    config.network.sync_bn = False
+    config.network.sync_bn = True
+    config.network.use_global_stats = False if config.network.sync_bn else True
 
-    os.makedirs(config.TRAIN.log_path, exist_ok=True)
-    log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
-    msg = pprint.pformat(config)
-    logging.info(msg)
     if args.demo:
         demo_net(config)
+        msg = pprint.pformat(config)
+        print(msg)
     else:
+        os.makedirs(config.TRAIN.log_path, exist_ok=True)
+        log_init(filename=os.path.join(config.TRAIN.log_path, "train_{}.log".format(time.time())))
+        msg = pprint.pformat(config)
+        logging.info(msg)
         train_net(config)
 
 
@@ -404,31 +416,38 @@ def demo_net(config):
     ctx_list = [mx.cpu()]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    net.collect_params().load("output/coco/RetinaNet-hflip/0-5000.params")
+    net.collect_params().load("output/coco/RetinaNet-hflip/1-50000.params")
     net.collect_params().reset_ctx(ctx_list[0])
     for x, y, z in os.walk("/data1/coco/val2017"):
-        for name in z:
+        for name in z[::-1]:
             path = os.path.join(x, name)
             image = cv2.imread(path)[:, :, ::-1]
             fscale = min(600 / min(image.shape[:2]), 1333 / max(image.shape[:2]))
             image_padded = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
             data = mx.nd.array(image_padded[np.newaxis], ctx=ctx_list[0])
-            predictions = net(data)
+            fpn_predictions = net(data)
             bboxes_pred_list = []
             num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
-            predictions = [x.reshape(x.shape[0], -1, num_anchors, x.shape[2], x.shape[3]) for x in predictions]
-            for fpn_prediction, base_size in zip(predictions, config.retinanet.network.BASE_SIZES):
-                stride = image_padded.shape[0] // fpn_prediction.shape[2]
-                fpn_prediction[:, 4:] = fpn_prediction[:, 4:].sigmoid()
+            num_reg_channels = 4 * num_anchors
+            cls_fpn_predictions = [x[:, num_reg_channels:].reshape(x.shape[0], -1, num_anchors, x.shape[2], x.shape[3]).sigmoid()
+                                   for x in fpn_predictions]
+            reg_fpn_predictions = [x[:, :num_reg_channels].reshape(x.shape[0], -1, num_anchors, x.shape[2], x.shape[3])
+                                   for x in fpn_predictions]
+            for reg_prediction, cls_prediction, base_size, stride in zip(reg_fpn_predictions,
+                                                                         cls_fpn_predictions,
+                                                                         config.retinanet.network.BASE_SIZES,
+                                                                         config.retinanet.network.FPN_STRIDES):
+                fpn_prediction = mx.nd.concat(reg_prediction, cls_prediction, dim=1)
                 fpn_prediction_reshaped_np = fpn_prediction.transpose((0, 3, 4, 2, 1)).asnumpy()
-                # fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
+                fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array([0.1, 0.1, 0.2, 0.2])[
+                    None, None, None, None]
                 rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
                                                                  base_size=base_size,
-                                                                 cls_threshold=.01,
+                                                                 cls_threshold=0,
                                                                  stride = stride
                                                                  )(image=data.asnumpy(),
                                                                    feature=fpn_prediction_reshaped_np)
-                # plt.imshow(fpn_prediction_reshaped_np[0, :, :, :, 4:].max(axis=2).max(axis=2))
+                # plt.imshow(fpn_prediction_reshaped_np[0, :, :, :, 4:].max(axis=2).argmax(axis=2))
                 # plt.show()
                 rois = rois[0]
                 rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
@@ -436,13 +455,13 @@ def demo_net(config):
             bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
             cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
                                           overlap_thresh=.3, coord_start=0, score_index=4, id_index=-1,
-                                          force_suppress=True, in_format='corner',
+                                          force_suppress=False, in_format='corner',
                                           out_format='corner').asnumpy()
             cls_dets = cls_dets[np.argsort(-1 * cls_dets[:, 4])[:10]]
             # cls_dets = bboxes_pred
 
             gluoncv.utils.viz.plot_bbox(image_padded, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
-                                        thresh=0.01, class_names=gluoncv.data.COCODetection.CLASSES)
+                                        thresh=0.5, class_names=gluoncv.data.COCODetection.CLASSES)
             plt.show()
             pass
 

@@ -42,15 +42,19 @@ MOBULA_FUNC void retinanet_regression(const int image_h, const int image_w,
 	                T anchor_y1 = ori_y + anchor_h / 2;
 	                if(anchor_x0 < 0){
 	                    anchor_x0 = 0;
+	                    continue;
 	                }
 	                if(anchor_y0 < 0){
 	                    anchor_y0 = 0;
+                        continue;
 	                }
 	                if(anchor_x1 > image_w){
 	                    anchor_x1 = image_w;
+                        continue;
 	                }
 	                if(anchor_y1 > image_h){
 	                    anchor_y1 = image_h;
+                        continue;
 	                }
 	                if(anchor_x0 >= anchor_x1 || anchor_y0 >= anchor_y1){
 	                    continue;
