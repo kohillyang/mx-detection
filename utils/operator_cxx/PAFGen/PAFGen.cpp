@@ -1,7 +1,6 @@
 /*
  * author: kohill
  */
-#include "bilinear.h"
 #include "mobula_op.h"
 #include <memory>
 #include <cmath>
@@ -73,7 +72,7 @@ void putVecMaps(Dtype* entryX, Dtype* entryY, Dtype* count, float centerA_x0, fl
 }
 
 template <typename T, typename T_index>
-MOBULA_KERNEL paf_gen_kernel(const T_index* limb_sequence, const T* keypoints, const int h, const int w, const int stride,
+MOBULA_FUNC void paf_gen(const T_index* limb_sequence, const T* keypoints, const int h, const int w, const int stride,
                               const int nperson, const int nparts, const int nlimb, int threshold, T* output) {
     const int grid_x = w / stride;
     const int grid_y = h / stride;

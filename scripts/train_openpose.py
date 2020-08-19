@@ -103,8 +103,53 @@ def parse_args():
     return args
 
 
+def get_coco_config():
+    config = easydict.EasyDict()
+    config.TRAIN = easydict.EasyDict()
+    config.TRAIN.save_prefix = "output/openpose/"
+    config.TRAIN.model_prefix = os.path.join(config.TRAIN.save_prefix, "resnet50-")
+    config.TRAIN.batch_size = 12
+    config.TRAIN.optimizer = "SGD"
+    config.TRAIN.lr = 2e-5
+    config.TRAIN.momentum = 0.9
+    config.TRAIN.wd = 0.0004
+    config.TRAIN.lr_step = [36, 48]
+    config.TRAIN.warmup_step = 1000
+    config.TRAIN.gamma = 1.0 / 3
+    config.TRAIN.warmup_lr = config.TRAIN.lr * 0.1
+    config.TRAIN.end_step = 600000
+    config.TRAIN.resume = None
+    config.TRAIN.TRANSFORM_PARAMS = easydict.EasyDict()
+
+    # params for random cropping
+    config.TRAIN.TRANSFORM_PARAMS.crop_size_x = 368
+    config.TRAIN.TRANSFORM_PARAMS.crop_size_y = 368
+    config.TRAIN.TRANSFORM_PARAMS.center_perterb_max = 40
+
+    # params for random scale
+    config.TRAIN.TRANSFORM_PARAMS.scale_min = 0.5
+    config.TRAIN.TRANSFORM_PARAMS.scale_max = 1.1
+    config.TRAIN.TRANSFORM_PARAMS.target_dist = 0.6
+
+    # params for putGaussianMaps
+    config.TRAIN.TRANSFORM_PARAMS.sigma = 7.0
+
+    # params for putVecMaps
+    config.TRAIN.TRANSFORM_PARAMS.distance_threshold = 1  # type must be integer
+
+    # params for both putGaussianMaps and putVecMaps
+    config.TRAIN.TRANSFORM_PARAMS.stride = 8
+
+    # params for random rotation
+    config.TRAIN.TRANSFORM_PARAMS.max_rotation_degree = 40
+
+    return config
+
+
 if __name__ == '__main__':
-    from configs import get_coco_config
+    mobula.op.load('HeatGen', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load('PAFGen', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+
     config = get_coco_config()
     args = parse_args()
     if args.disable_fusion:
@@ -187,7 +232,7 @@ if __name__ == '__main__':
     val_loader = mx.gluon.data.DataLoader(val_dataset, batch_size=config.TRAIN.batch_size,
                                             shuffle=True, num_workers=12, thread_pool=False, last_batch="discard")
 
-    lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=config.TRAIN.lr_step,
+    lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=[len(train_loader) * int(x) for x in config.TRAIN.lr_step],
                                                         warmup_mode="constant", factor=config.TRAIN.gamma,
                                                         base_lr=config.TRAIN.lr,
                                                         warmup_steps=config.TRAIN.warmup_step,

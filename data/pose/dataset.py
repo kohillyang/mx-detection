@@ -13,8 +13,6 @@ class PafHeatMapDataSet(object):
         self.transforms = transforms
         self.number_of_keypoints = self.baseDataSet.number_of_keypoints
         self.number_of_pafs = len(self.baseDataSet.skeleton)
-        mobula.op.load('HeatGen', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
-        mobula.op.load('PAFGen', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
         self.cfg = config
         self.sigma = config.TRAIN.TRANSFORM_PARAMS.sigma
         self.stride = config.TRAIN.TRANSFORM_PARAMS.stride
