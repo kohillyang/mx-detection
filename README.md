@@ -1,13 +1,12 @@
 ## Main results
 `1`. VOC2012 trainval + VOC2007 trainval, test on VOC2007 test, DCN+ResNet50, mAP@IoU=0.5 is 0.804<br>
-Download the pre-trained model from [OneDrive](https://pkamc-my.sharepoint.com/:u:/g/personal/by3410_office365vip_tech/EY1Ta2f54aZNklq4zjjek3wBXRy1uEMWYVhTymsPCfqvmA?e=BUbGGR)
 
 `2`. VOC2012 trainval + VOC2007 trainval, test on VOC2007 test, DCN+ResNet101, mAP@IoU=0.5 is 0.825<br>
-Download the pre-trained model from [OneDrive](https://pkamc-my.sharepoint.com/:u:/g/personal/by3410_office365vip_tech/EW8hZtillhNJmIiq8A4OMpsB0NdkBxNVwEfGU0TMT7qvVA?e=cVQCO9)
 
-`3`. COCO2017, FPN + ResNet50 + FCOS[Work in Progress]<https://arxiv.org/abs/1904.01355><br>
+`3`. COCO2017, FPN + ResNet50 + FCOS<https://arxiv.org/abs/1904.01355>, scale=(800, 1000)<br>
 Download the pre-trained model from [GoogleDrive](https://drive.google.com/drive/folders/1UocX6i1P-_xSUpW9inB8dk5dF2gCdK5L?usp=sharing).
-```
+
+```bash
 Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.353
 Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.531
 Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.375
@@ -20,9 +19,29 @@ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.466
 Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.249
 Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.520
 Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.605
-
 ```
-`4` OpenPose, COCO2017 ResNet50 <https://arxiv.org/pdf/1812.08008.pdf>
+
+`4`. COCO2017, FPN + ResNet50 + RetinaNet, scale=(600, 1333)<br>
+Download the pre-trained model from [GoogleDrive](https://drive.google.com/drive/folders/1jxzQQ8txqPSmMSeMP_LDVh9x2BYnGKTR?usp=sharing).
+
+```bash
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.324
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.507
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.344
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.152
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.376
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.453
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.272
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.408
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.421
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.205
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.482
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.586
+```
+
+`5` OpenPose, COCO2017 ResNet50 <https://arxiv.org/pdf/1812.08008.pdf><br>
+Download the pre-trained model from [GoogleDrive](https://drive.google.com/drive/folders/1l5SOCr0P5w3-HxetQ1W0HmSgSyrmK0ha?usp=sharing).
+
 
 Training command:
 ```bash
