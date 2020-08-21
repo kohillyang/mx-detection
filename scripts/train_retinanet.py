@@ -187,7 +187,10 @@ def train_net(config):
     batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
+    from utils import graph_optimize
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
+    if config.network.merge_backbone_bn:
+        net = graph_optimize.merge_gluon_hybrid_block_bn(net, (1, 368, 368, 3))
 
     # Resume parameters.
     resume = None
@@ -208,7 +211,13 @@ def train_net(config):
     params = net.collect_params()
     for key in params.keys():
         if params[key]._data is None:
-            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Xavier()
+            if "bias" in key or "beta" in key or "offset" in key:
+                default_init = mx.init.Zero()
+            elif "gamma" in key or "var" in key:
+                default_init = mx.init.One()
+            else:
+                default_init = mx.init.Xavier()
+
             default_init.set_verbosity(True)
             if params[key].init is not None and hasattr(params[key].init, "set_verbosity"):
                 params[key].init.set_verbosity(True)
@@ -398,8 +407,9 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.sync_bn = True
+    config.network.sync_bn = False
     config.network.use_global_stats = False if config.network.sync_bn else True
+    config.network.merge_backbone_bn = False
 
     config.val = easydict.EasyDict()
     if args.demo:
