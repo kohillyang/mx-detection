@@ -365,6 +365,8 @@ def train_net(config):
     mobula.op.load("FocalLoss")
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         net.hybridize(static_alloc=True, static_shape=False)
+        for ctx in ctx_list:
+            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
             targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
@@ -409,11 +411,13 @@ def train_net(config):
                 logging.info("Saved checkpoint to {}".format(save_path))
                 trainer_path = save_path + "-trainer.states"
                 trainer.save_states(trainer_path)
+            mx.nd.waitall()
         save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
         trainer_path = save_path + "-trainer.states"
         trainer.save_states(trainer_path)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='QwQ')
@@ -469,7 +473,7 @@ def main():
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.image_max_long_size = 1333
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
