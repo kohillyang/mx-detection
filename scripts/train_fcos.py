@@ -363,6 +363,8 @@ def train_net(config):
     for child_metric in [metric_loss_loc, metric_loss_cls, metric_loss_center]:
         eval_metrics.add(child_metric)
     mobula.op.load("FocalLoss")
+    mobula.op.load("IoULoss", os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         net.hybridize(static_alloc=True, static_shape=False)
         for ctx in ctx_list:
@@ -381,18 +383,19 @@ def train_net(config):
                     fpn_predictions = net(data)
                     preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
                     num_pos = targets[:, 0].sum() + 1
-                    reg_mask = targets[:, 0]
-                    # iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
+                    iou_loss = mobula.op.IoULoss(preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4)),
+                                                 targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
+                                                 ) * targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1)) / (targets[:, 5].sum() + 1)
                     loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=preds[:, 5:], targets=targets[:, 6:]) / num_pos
-                    loss_total = loss_center.sum()  + loss_cls.sum()
+                    loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
                     if config.TRAIN.USE_FP16:
                         with amp.scale_loss(loss_total, trainer) as scaled_losses:
                             ag.backward(scaled_losses)
                     else:
                         loss_total.backward()
-                    # losses_loc.append(iou_loss)
+                    losses_loc.append(iou_loss)
                     losses_center_ness.append(loss_center)
                     losses_cls.append(loss_cls)
             trainer.step(len(ctx_list))
