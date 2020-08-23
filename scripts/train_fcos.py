@@ -367,6 +367,8 @@ def train_net(config):
         net.hybridize(static_alloc=True, static_shape=False)
         for ctx in ctx_list:
             _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+            del _
+        mx.nd.waitall()
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
             targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
@@ -380,17 +382,17 @@ def train_net(config):
                     preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
                     num_pos = targets[:, 0].sum() + 1
                     reg_mask = targets[:, 0]
-                    iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
+                    # iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
                     loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=preds[:, 5:], targets=targets[:, 6:]) / num_pos
-                    loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
+                    loss_total = loss_center.sum()  + loss_cls.sum()
                     if config.TRAIN.USE_FP16:
                         with amp.scale_loss(loss_total, trainer) as scaled_losses:
                             ag.backward(scaled_losses)
                     else:
                         loss_total.backward()
-                    losses_loc.append(iou_loss)
+                    # losses_loc.append(iou_loss)
                     losses_center_ness.append(loss_center)
                     losses_cls.append(loss_cls)
             trainer.step(len(ctx_list))
