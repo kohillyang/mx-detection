@@ -477,8 +477,6 @@ def main():
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
     config.TRAIN.image_max_long_size = 1333
-    config.TRAIN.log_path = "output/{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
-        config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
 
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
@@ -497,6 +495,15 @@ def main():
     config.network.FIXED_PARAMS = []
     config.network.use_global_stats = True
     config.network.sync_bn = False
+
+    if config.TRAIN.USE_FP16:
+        assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
+
+    config.TRAIN.log_path = "output/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
+        "FCOS",
+        "fp16" if config.TRAIN.USE_FP16 else "fp32",
+        "sync_bn" if config.network.sync_bn else "normal_bn",
+        config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
 
     config.val = easydict.EasyDict()
     if args.demo:
