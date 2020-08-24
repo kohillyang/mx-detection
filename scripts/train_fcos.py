@@ -231,6 +231,9 @@ class FCOSTargetGenerator(object):
 def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
+    if config.TRAIN.USE_FP16:
+        from mxnet.contrib import amp
+        amp.init()
 
     backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
                            use_global_stats=config.network.use_global_stats)
@@ -272,11 +275,7 @@ def train_net(config):
         logging.info("loaded resume from {}".format(config.TRAIN.resume))
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
-    if config.TRAIN.USE_FP16:
-        from mxnet.contrib import amp
-        amp.init()
-        net.cast("float16")
-        net.collect_params('.*batchnorm.*').setattr('dtype', 'float32')
+
     if config.TRAIN.aspect_grouping:
         if config.dataset.dataset_type == "coco":
             from data.bbox.mscoco import COCODetection
@@ -476,7 +475,7 @@ def main():
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 700
+    config.TRAIN.image_short_size = 800
     config.TRAIN.image_max_long_size = 1333
     config.TRAIN.log_path = "output/{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
         config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
@@ -491,7 +490,7 @@ def main():
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
-    config.TRAIN.USE_FP16 = False
+    config.TRAIN.USE_FP16 = True
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
