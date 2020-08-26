@@ -274,39 +274,37 @@ def train_net(config):
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
-    if config.TRAIN.aspect_grouping:
-        if config.dataset.dataset_type == "coco":
-            from data.bbox.mscoco import COCODetection
-            base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                               h_flip=config.TRAIN.FLIP, transform=None)
-        elif config.dataset.dataset_type == "voc":
-            from data.bbox.voc import VOCDetection
-            base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
-                                              splits=((2007, 'trainval'), (2012, 'trainval')),
-                                              preload_label=False)
-        else:
-            assert False
-        train_dataset = AspectGroupingDataset(base_train_dataset, config, target_generator=FCOSTargetGenerator(config))
-    else:
-        train_transforms = bbox_t.Compose([
-            # Flipping is implemented in dataset.
-            bbox_t.ResizePad(dst_h=config.TRAIN.PAD_H, dst_w=config.TRAIN.PAD_W),
-            FCOSTargetGenerator(config)
-        ])
+    if config.dataset.dataset_type == "coco":
         from data.bbox.mscoco import COCODetection
-        train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                      h_flip=config.TRAIN.FLIP, transform=train_transforms)
-    if config.use_hvd:
-        da_length = len(train_dataset) / hvd.local_size() * hvd.local_size()
-        da_length = int(da_length)
-        sampler = gluoncv.data.sampler.SplitSampler(da_length, hvd.local_size(), hvd.local_rank())
-        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=config.TRAIN.batch_size,
-                                                num_workers=16, last_batch="discard",
-                                                thread_pool=False, sampler=sampler)
+        base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
+                                           h_flip=config.TRAIN.FLIP, transform=None)
+    elif config.dataset.dataset_type == "voc":
+        from data.bbox.voc import VOCDetection
+        base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
+                                          splits=((2007, 'trainval'), (2012, 'trainval')),
+                                          preload_label=False)
     else:
-        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=config.TRAIN.batch_size,
-                                                num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
+        assert False
+    train_dataset = AspectGroupingDataset(base_train_dataset, config, target_generator=FCOSTargetGenerator(config))
 
+    if config.use_hvd:
+        class SplitDataset(object):
+            def __init__(self, da, local_size, local_rank):
+                self.da = da
+                self.local_size = local_size
+                self.locak_rank = local_rank
+
+            def __len__(self):
+                return len(self.da) // self.local_size
+
+            def __getitem__(self, idx):
+                return self.da[idx * self.local_size + self.locak_rank]
+
+        train_dataset = SplitDataset(train_dataset, local_size=hvd.local_size(), local_rank=hvd.local_rank())
+
+    train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1,
+                                            num_workers=16, last_batch="discard", shuffle=True,
+                                            thread_pool=False, batchify_fn=batch_fn)
 
     params_all = net.collect_params()
     params_to_train = {}
@@ -376,10 +374,13 @@ def train_net(config):
             _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
             del _
         mx.nd.waitall()
-        for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)
-                                            if not config.use_hvd or hvd.local_rank() else train_loader):
-            data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
-            targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
+        for data_batch in tqdm.tqdm(train_loader) if not config.use_hvd or hvd.local_rank() == 0 else train_loader:
+            if config.use_hvd:
+                data_list = [data_batch[0].as_in_context(ctx_list[0])]
+                targets_list = [data_batch[1].as_in_context(ctx_list[0])]
+            else:
+                data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
+                targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
 
             losses_loc = []
             losses_center_ness = []
@@ -427,11 +428,13 @@ def train_net(config):
                     logging.info("Saved checkpoint to {}".format(save_path))
                     trainer_path = save_path + "-trainer.states"
                     trainer.save_states(trainer_path)
-        save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
-        net.collect_params().save(save_path)
-        logging.info("Saved checkpoint to {}".format(save_path))
-        trainer_path = save_path + "-trainer.states"
-        trainer.save_states(trainer_path)
+
+        if not config.use_hvd or hvd.local_rank() == 0:
+            save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
+            net.collect_params().save(save_path)
+            logging.info("Saved checkpoint to {}".format(save_path))
+            trainer_path = save_path + "-trainer.states"
+            trainer.save_states(trainer_path)
 
 
 def parse_args():
