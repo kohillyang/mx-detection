@@ -234,15 +234,13 @@ def train_net(config):
     if config.TRAIN.USE_FP16:
         from mxnet.contrib import amp
         amp.init()
+    if config.use_hvd:
+        import horovod.mxnet as hvd
 
     backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
                            use_global_stats=config.network.use_global_stats)
-    batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
-    if config.use_hvd:
-        import horovod.mxnet as hvd
-        hvd.init()
 
     # Resume parameters.
     resume = None
@@ -300,7 +298,7 @@ def train_net(config):
         from data.bbox.mscoco import COCODetection
         train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
                                       h_flip=config.TRAIN.FLIP, transform=train_transforms)
-        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
+        train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=config.TRAIN.batch_size,
                                                 num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
 
     params_all = net.collect_params()
@@ -345,8 +343,8 @@ def train_net(config):
              },
             update_on_kvstore=(False if config.TRAIN.USE_FP16 else None), kvstore=mx.kvstore.create('local')
         )
-        if config.TRAIN.USE_FP16:
-            amp.init_trainer(trainer)
+    if config.TRAIN.USE_FP16:
+        amp.init_trainer(trainer)
     # trainer = mx.gluon.Trainer(
     #     params_to_train,  # fix batchnorm, fix first stage, etc...
     #     'adam', {"learning_rate": 4e-4})
@@ -364,7 +362,8 @@ def train_net(config):
     mobula.op.load("FocalLoss")
     mobula.op.load("IoULoss", os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
-    for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
+    while trainer.optimizer.num_update <= config.TRAIN.end_epoch * len(train_loader):
+        epoch = trainer.optimizer.num_update // len(train_loader)
         net.hybridize(static_alloc=True, static_shape=False)
         for ctx in ctx_list:
             _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
@@ -397,25 +396,29 @@ def train_net(config):
                     losses_loc.append(iou_loss)
                     losses_center_ness.append(loss_center)
                     losses_cls.append(loss_cls)
-            trainer.step(len(ctx_list))
-            for l in losses_loc:
-                metric_loss_loc.update(None, l.sum())
-            for l in losses_center_ness:
-                metric_loss_center.update(None, l.sum())
-            for l in losses_cls:
-                metric_loss_cls.update(None, l.sum())
-            if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
-                msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
-                msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
-                logging.info(msg)
-                eval_metrics.reset()
-            if trainer.optimizer.num_update % 5000 == 0:
-                save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
-                net.collect_params().save(save_path)
-                logging.info("Saved checkpoint to {}".format(save_path))
-                trainer_path = save_path + "-trainer.states"
-                trainer.save_states(trainer_path)
-            mx.nd.waitall()
+
+            if config.use_hvd:
+                trainer.step(hvd.local_size())
+            else:
+                trainer.step(len(ctx_list))
+            if not config.use_hvd or hvd.local_rank() == 0:
+                for l in losses_loc:
+                    metric_loss_loc.update(None, l.sum())
+                for l in losses_center_ness:
+                    metric_loss_center.update(None, l.sum())
+                for l in losses_cls:
+                    metric_loss_cls.update(None, l.sum())
+                if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
+                    msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
+                    msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
+                    logging.info(msg)
+                    eval_metrics.reset()
+                if trainer.optimizer.num_update % 5000 == 0:
+                    save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
+                    net.collect_params().save(save_path)
+                    logging.info("Saved checkpoint to {}".format(save_path))
+                    trainer_path = save_path + "-trainer.states"
+                    trainer.save_states(trainer_path)
         save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
@@ -453,6 +456,10 @@ def main():
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
     config.use_hvd = False
+    if config.use_hvd:
+        import horovod.mxnet as hvd
+        hvd.init()
+        config.gpus = [hvd.local_rank()]
 
     config.dataset = easydict.EasyDict()
     config.dataset.NUM_CLASSES = args.num_classes
@@ -499,10 +506,11 @@ def main():
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
 
-    config.TRAIN.log_path = "output/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
+    config.TRAIN.log_path = "output/{}-{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
         "FCOS",
         "fp16" if config.TRAIN.USE_FP16 else "fp32",
         "sync_bn" if config.network.sync_bn else "normal_bn",
+        "hvd" if config.use_hvd else "",
         config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
 
     config.val = easydict.EasyDict()
