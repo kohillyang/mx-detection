@@ -303,7 +303,7 @@ def train_net(config):
         train_dataset = SplitDataset(train_dataset, local_size=hvd.local_size(), local_rank=hvd.local_rank())
 
     train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1,
-                                            num_workers=16, last_batch="discard", shuffle=True,
+                                            num_workers=8, last_batch="discard", shuffle=True,
                                             thread_pool=False, batchify_fn=batch_fn)
 
     params_all = net.collect_params()
