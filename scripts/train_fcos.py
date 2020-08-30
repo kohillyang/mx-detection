@@ -443,6 +443,8 @@ def parse_args():
     parser.add_argument('--num-classes', help='num-classes', required=False, type=int, default=81)
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
+    parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
+
     parser.add_argument('--demo', help='demo', action="store_true")
     args_known = parser.parse_known_args()[0]
     if args_known.demo:
@@ -466,7 +468,7 @@ def main():
 
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
-    config.use_hvd = True
+    config.use_hvd = args.hvd
     if config.use_hvd:
         import horovod.mxnet as hvd
         hvd.init()

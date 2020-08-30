@@ -7,6 +7,12 @@
 Download the pre-trained model from [GoogleDrive](https://drive.google.com/drive/folders/1UocX6i1P-_xSUpW9inB8dk5dF2gCdK5L?usp=sharing).
 
 ```bash
+Horovod script:
+PYTHONPATH=/data2/kohill/jye_sanka/MobulaOP/:./ /data2/kohill/jye_sanka/anaconda3/bin/horovodrun -np 3 -H localhost:3 /data2/kohill/jye_sanka/anaconda3/bin/python3 /data2/kohill/jye_sanka/mx-detection/scripts/train_fcos.py --dataset-root=/data/jingyouwang/ssddata/data/data/coco/ --gpus=0,1,2 --dataset-type=coco --num-classes=81 --hvd
+
+Training without horovod:
+PYTHONPATH=/data2/kohill/jye_sanka/MobulaOP/:./ /data2/kohill/jye_sanka/anaconda3/bin/python /data2/kohill/jye_sanka/mx-detection/scripts/train_fcos.py --dataset-root=/data/jingyouwang/ssddata/data/data/coco/ --gpus=0,1,2 --dataset-type=coco --num-classes=81
+
 Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.353
 Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.531
 Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.375
