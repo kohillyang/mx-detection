@@ -24,7 +24,6 @@ from data.bbox.bbox_dataset import AspectGroupingDataset
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 import data.transforms.bbox as bbox_t
 import mobula
-setattr(mobula.config, "NVCC", "/usr/local/cuda-10.0/bin/nvcc")
 mobula.op.load('RetinaNetTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 mobula.op.load('RetinaNetRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
@@ -171,7 +170,7 @@ class RetinaNetTargetGenerator(object):
             targets[0, :] = 0
             targets[1, :] = 0
         outputs.append(targets)
-        outputs = tuple(mx.nd.array(x) for x in outputs)
+        outputs = tuple(np.array(x) for x in outputs)
         return outputs
 
 
@@ -293,9 +292,13 @@ def train_net(config):
     mobula.op.load("FocalLoss")
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         net.hybridize(static_alloc=True, static_shape=False)
+        for ctx in ctx_list:
+            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+            del _
+        mx.nd.waitall()
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
-            data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
-            targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
+            data_list = mx.gluon.utils.split_and_load(data_batch[0][0], ctx_list=ctx_list, batch_axis=0)
+            targets_list = mx.gluon.utils.split_and_load(data_batch[0][1], ctx_list=ctx_list, batch_axis=0)
             losses = []
             losses_loc = []
             losses_cls = []
@@ -351,8 +354,10 @@ def parse_args():
     parser.add_argument('--dataset-type', help='voc or coco', required=False, type=str, default="coco")
     parser.add_argument('--num-classes', help='num-classes', required=False, type=int, default=81)
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
-    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
     parser.add_argument('--demo', help='demo', action="store_true")
+    parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
+
     args_known = parser.parse_known_args()[0]
     if args_known.demo:
         parser.add_argument('--demo-params', help='Params file you want to load for evaluating.', type=str, required=True)
@@ -366,6 +371,7 @@ def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
+    setattr(mobula.config, "NVCC", args.nvcc)
 
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]

@@ -37,3 +37,10 @@ openmpi-4.0.4.tar.gz
 utils/operator_cxx/RetinaNetRegression/build/
 
 utils/operator_cxx/HeatGen/build/
+
+utils/operator_cxx/IoULoss/build
+utils/operator_cxx/IoULoss/mobula_op.hash.cache
+
+utils/operator_cxx/FCOSTargetGenerator/mobula_op.hash.cache
+
+utils/operator_cxx/RetinaNetTargetGenerator/mobula_op.hash.cache

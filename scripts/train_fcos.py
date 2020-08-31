@@ -20,7 +20,7 @@ from utils.common import log_init
 sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 import data.transforms.bbox as bbox_t
 import mobula
-setattr(mobula.config, "NVCC", "/usr/local/cuda-10.0/bin/nvcc")
+print(mobula.__path__)
 mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 import argparse
@@ -219,12 +219,13 @@ class FCOSTargetGenerator(object):
         for stride, min_distance, max_distance in zip(self.strides, self.fpn_min_distance, self.fpn_max_distance):
             target = mobula.op.FCOSTargetGenerator[np.ndarray](stride, min_distance, max_distance, self.number_of_classes)(
                 image_transposed.astype(np.float32), bboxes.astype(np.float32))
+
             target = target.transpose((2, 0, 1))
             target = target.reshape((target.shape[0], -1))
             targets.append(target)
         targets = np.concatenate(targets, axis=1)
         outputs.append(targets)
-        outputs = tuple(mx.nd.array(x) for x in outputs)
+        outputs = tuple(np.array(x) for x in outputs)
         return outputs
 
 
@@ -379,8 +380,8 @@ def train_net(config):
                 data_list = [data_batch[0].as_in_context(ctx_list[0])]
                 targets_list = [data_batch[1].as_in_context(ctx_list[0])]
             else:
-                data_list = mx.gluon.utils.split_and_load(data_batch[0], ctx_list=ctx_list, batch_axis=0)
-                targets_list = mx.gluon.utils.split_and_load(data_batch[1], ctx_list=ctx_list, batch_axis=0)
+                data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][0]), ctx_list=ctx_list, batch_axis=0)
+                targets_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][1]), ctx_list=ctx_list, batch_axis=0)
 
             losses_loc = []
             losses_center_ness = []
@@ -444,6 +445,7 @@ def parse_args():
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
+    parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
 
     parser.add_argument('--demo', help='demo', action="store_true")
     args_known = parser.parse_known_args()[0]
@@ -463,8 +465,12 @@ def main():
     os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
     os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
     os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
+    os.environ["MXNET_BACKWARD_DO_MIRROR"]="1"
+    os.environ["MXNET_KVSTORE_LOGTREE"] = "1"
+    os.environ["MXNET_KVSTORE_USETREE"] = "1"
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
+    setattr(mobula.config, "NVCC", args.nvcc)
 
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]

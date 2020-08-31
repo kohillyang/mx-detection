@@ -300,5 +300,5 @@ class AspectGroupingDataset(object):
             images_and_targets_list.append(images_and_targets)
         r = []
         for i in range(len(images_and_targets_list[0])):
-            r.append(mx.nd.concat(*[x[i][np.newaxis] for x in images_and_targets_list], dim=0))
-        return tuple(r)
+            r.append(np.concatenate([x[i][np.newaxis] for x in images_and_targets_list], axis=0))
+        return tuple((mx.nd.array(x) for x in r))
