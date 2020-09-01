@@ -1,133 +1,58 @@
+import argparse
 import logging
 import os
 import pprint
-import sys
 import time
 
 import cv2
 import easydict
 import gluoncv
 import matplotlib.pyplot as plt
+import mobula
 import mxnet as mx
 import mxnet.autograd as ag
 import numpy as np
 import tqdm
 
 from data.bbox.bbox_dataset import AspectGroupingDataset
-from models.fcos.resnetv1b import FPNResNetV1
 from utils.common import log_init
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
-import data.transforms.bbox as bbox_t
-import mobula
-print(mobula.__path__)
-mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
-mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
-import argparse
-
-@mobula.op.register
-class BCELoss:
-    def forward(self, y, target):
-        return mx.nd.log(1 + mx.nd.exp(y)) - target * y
-
-    def backward(self, dy):
-        grad = mx.nd.sigmoid(self.X[0]) - self.X[1]
-        # grad *= 1e-4
-        self.dX[0][:] = grad * dy
-
-    def infer_shape(self, in_shape):
-        try:
-            assert in_shape[0] == in_shape[1]
-        except AssertionError as e:
-            print(in_shape)
-            raise e
-        return in_shape, [in_shape[0]]
+from models.backbones.resnet import ResNetV1B
 
 
-def BCEFocalLossWithoutAlpha(x, target):
-    # p = x.sigmoid()
-    # loss = target * ((1-p)**2) * mx.nd.log(p + 1e-7) + (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
-    # return (-1 * loss).mean()
-    bce_loss = BCELoss(x, target)
-    pt = mx.nd.exp(-1 * bce_loss)
-    r = bce_loss * (1-pt) **2
-    return r
-
-
-def BCEFocalLoss(x, target):
-    alpha = .25
-    p = x.sigmoid()
-    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-11)
-    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-11)
-    return -loss
-
-
-@mobula.op.register
-class L2Loss:
-    def forward(self, y, target):
-        # return 2 * mx.nd.log(1 + mx.nd.exp(y)) - y - target * y
-        return (y - target) ** 2
-
-    def backward(self, dy):
-        # grad = mx.nd.sigmoid(self.X[0])*2 - 1 - self.X[1]
-        grad = 2 * (self.X[0] - self.X[1])
-        # grad *= 1e-4
-        self.dX[0][:] = grad * dy
-
-    def infer_shape(self, in_shape):
-        assert in_shape[0] == in_shape[1]
-        return in_shape, [in_shape[0]]
-
-
-class IoULoss(mx.gluon.nn.Block):
-    def __init__(self):
-        super(IoULoss, self).__init__()
-
-    def max(self, *args):
-        if len(args) == 1:
-            return args[0]
-        else:
-            maximum = args[0]
-            for arg in args[1:]:
-                maximum = mx.nd.maximum(maximum, arg)
-            return maximum
-
-    def forward(self, prediction, target):
-        assert prediction.shape[1] == 4
-        assert target.shape[1] == 4
-        target = mx.nd.maximum(target, mx.nd.ones_like(target))
-        target = mx.nd.log(target)
-
-        l, t, r, b = 0, 1, 2, 3 # l, t, r, b
-        tl = target[:, t] + target[:, l]
-        tr = target[:, t] + target[:, r]
-        bl = target[:, b] + target[:, l]
-        br = target[:, b] + target[:, r]
-        tl_hat = prediction[:, t] + prediction[:, l]
-        tr_hat = prediction[:, t] + prediction[:, r]
-        bl_hat = prediction[:, b] + prediction[:, l]
-        br_hat = prediction[:, b] + prediction[:, r]
-
-        x_t_i = mx.nd.minimum(target[:, t], prediction[:, t])
-        x_b_i = mx.nd.minimum(target[:, b], prediction[:, b])
-        x_l_i = mx.nd.minimum(target[:, l], prediction[:, l])
-        x_r_i = mx.nd.minimum(target[:, r], prediction[:, r])
-
-        tl_i = x_t_i + x_l_i
-        tr_i = x_t_i + x_r_i
-        bl_i = x_b_i + x_l_i
-        br_i = x_b_i + x_r_i
-
-        max_v = self.max(tl, tr, bl, br, tl_hat, tr_hat, bl_hat, br_hat, tl_i, tr_i, bl_i, br_i)
-        I = mx.nd.exp(tl_i - max_v) + mx.nd.exp(tr_i- max_v) + mx.nd.exp(bl_i- max_v) + mx.nd.exp(br_i- max_v)
-        X = mx.nd.exp(tl- max_v) + mx.nd.exp(tr- max_v) + mx.nd.exp(bl- max_v) + mx.nd.exp(br- max_v)
-        X_hat = mx.nd.exp(tl_hat- max_v) + mx.nd.exp(tr_hat- max_v) + mx.nd.exp(bl_hat- max_v) + mx.nd.exp(br_hat- max_v)
-        I_over_U = I / (X + X_hat - I) + 1e-7
-        return -I_over_U.log()
+def load_mobula_ops():
+    logging.info(mobula.__path__)
+    mobula.op.load('BCELoss', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
 
 def batch_fn(x):
     return x
+
+
+class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
+    def __init__(self, feature_dim=256):
+        super(PyramidNeckFCOS, self).__init__()
+        self.fpn_p7_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p7_1x1_", strides=2, padding=1)
+        self.fpn_p6_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p6_1x1_", strides=2, padding=1)
+        self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
+        self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
+        self.fpn_p3_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p3_1x1_")
+
+    def hybrid_forward(self, F, res2, res3, res4, res5):
+        fpn_p5_1x1 = self.fpn_p5_1x1(res5)
+        fpn_p4_1x1 = self.fpn_p4_1x1(res4)
+        fpn_p3_1x1 = self.fpn_p3_1x1(res3)
+
+        fpn_p5_upsample = F.contrib.BilinearResize2D(fpn_p5_1x1, mode="like", like=fpn_p4_1x1)
+        fpn_p4_plus = F.ElementWiseSum(*[fpn_p5_upsample, fpn_p4_1x1])
+        fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, mode="like", like=fpn_p3_1x1)
+        fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
+
+        p6 = self.fpn_p6_3x3(F.relu(fpn_p5_1x1))
+        p7 = self.fpn_p7_3x3(F.relu(p6))
+
+        return fpn_p3_plus, fpn_p4_plus, fpn_p5_1x1, p6, p7
 
 
 class FCOS_Head(mx.gluon.nn.HybridBlock):
@@ -232,15 +157,18 @@ class FCOSTargetGenerator(object):
 def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
+
     if config.TRAIN.USE_FP16:
         from mxnet.contrib import amp
         amp.init()
     if config.use_hvd:
         import horovod.mxnet as hvd
 
-    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
-                           use_global_stats=config.network.use_global_stats)
     ctx_list = [mx.gpu(x) for x in config.gpus]
+    neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
+    backbone = ResNetV1B(neck=neck,
+                         sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
+                         use_global_stats=config.network.use_global_stats)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -394,7 +322,7 @@ def train_net(config):
                     iou_loss = mobula.op.IoULoss(preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4)),
                                                  targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
                                                  ) * targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1)) / (targets[:, 5].sum() + 1)
-                    loss_center = BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
+                    loss_center = mobula.op.BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=preds[:, 5:], targets=targets[:, 6:]) / num_pos
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
@@ -469,6 +397,7 @@ def main():
     os.environ["MXNET_KVSTORE_LOGTREE"] = "1"
     os.environ["MXNET_KVSTORE_USETREE"] = "1"
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    load_mobula_ops()
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
 
@@ -521,7 +450,7 @@ def main():
     config.network.FIXED_PARAMS = []
     config.network.use_global_stats = True
     config.network.sync_bn = False
-
+    config.network.fpn_neck_feature_dim = 256
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
 
@@ -583,7 +512,10 @@ def demo_net(config):
     from utils.evaluate import evaluate_coco
     import tqdm
     ctx_list = [mx.gpu(x) for x in config.gpus]
-    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=3, use_global_stats=True)
+    neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
+    backbone = ResNetV1B(neck=neck,
+                         sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
+                         use_global_stats=config.network.use_global_stats)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
     net.collect_params().load(config.val.params_file)
     net.collect_params().reset_ctx(ctx_list[0])
