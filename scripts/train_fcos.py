@@ -443,7 +443,7 @@ def main():
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
-    config.TRAIN.USE_FP16 = True
+    config.TRAIN.USE_FP16 = False
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
