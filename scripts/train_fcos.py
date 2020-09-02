@@ -377,6 +377,8 @@ def parse_args():
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
+    parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
+                        required=False, type=int, default=2)
 
     parser.add_argument('--demo', help='demo', action="store_true")
     args_known = parser.parse_known_args()[0]
@@ -396,10 +398,7 @@ def main():
     os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
     os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
     os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
-    os.environ["MXNET_BACKWARD_DO_MIRROR"]="1"
-    os.environ["MXNET_KVSTORE_LOGTREE"] = "1"
-    os.environ["MXNET_KVSTORE_USETREE"] = "1"
-    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     load_mobula_ops()
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
@@ -424,7 +423,7 @@ def main():
     config.FCOS.network.FPN_MINIMUM_DISTANCES = [0, 64, 128, 256, 512]
     config.FCOS.network.FPN_MAXIMUM_DISTANCES = [64, 128, 256, 512, 4096]
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.batch_size = 2 * len(config.gpus)
+    config.TRAIN.batch_size = args.im_per_gpu * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
     config.TRAIN.warmup_lr = config.TRAIN.lr
     config.TRAIN.warmup_step = 1000
