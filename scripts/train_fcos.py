@@ -296,13 +296,16 @@ def train_net(config):
     mobula.op.load("FocalLoss")
     mobula.op.load("IoULoss", os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
+    net.hybridize(static_alloc=True, static_shape=False)
+    for ctx in ctx_list:
+        _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+        del _
+    mx.nd.waitall()
+
     while trainer.optimizer.num_update <= config.TRAIN.end_epoch * len(train_loader):
         epoch = trainer.optimizer.num_update // len(train_loader)
-        net.hybridize(static_alloc=True, static_shape=False)
         for ctx in ctx_list:
-            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
-            del _
-        mx.nd.waitall()
+            ctx.empty_cache()
         for data_batch in tqdm.tqdm(train_loader) if not config.use_hvd or hvd.local_rank() == 0 else train_loader:
             if config.use_hvd:
                 data_list = [data_batch[0].as_in_context(ctx_list[0])]
@@ -454,7 +457,7 @@ def main():
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
 
-    config.TRAIN.log_path = "output/{}-{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
+    config.TRAIN.log_path = "output/{}/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
         "FCOS",
         "fp16" if config.TRAIN.USE_FP16 else "fp32",
         "sync_bn" if config.network.sync_bn else "normal_bn",
