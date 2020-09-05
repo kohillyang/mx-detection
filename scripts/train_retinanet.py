@@ -99,8 +99,7 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
         feat_reg = self.feat_reg(x)
         x_loc = self.feat_reg_loc(feat_reg)
         x_cls = self.feat_cls(x)
-        x = F.concat(x_loc, x_cls, dim=1)
-        return x
+        return [x_loc, x_cls]
 
 
 class FCOSFPNNet(mx.gluon.nn.HybridBlock):
@@ -306,9 +305,8 @@ def train_net(config):
                 for data, targets in zip(data_list, targets_list):
                     # targets: (2, 86, num_anchors, h x w)
                     fpn_predictions = net(data)
-                    num_reg_channels = num_anchors * 4
-                    cls_fpn_predictions = [x[:, num_reg_channels:].reshape(x.shape[0], -1, num_anchors, x.shape[2] * x.shape[3]) for x in fpn_predictions]
-                    reg_fpn_predictions = [x[:, :num_reg_channels].reshape(x.shape[0], -1, num_anchors, x.shape[2] * x.shape[3]) for x in fpn_predictions]
+                    reg_fpn_predictions = [x[0].reshape(x[0].shape[0], -1, num_anchors, x[0].shape[2] * x[0].shape[3]) for x in fpn_predictions]
+                    cls_fpn_predictions = [x[1].reshape(x[1].shape[0], -1, num_anchors, x[1].shape[2] * x[1].shape[3]) for x in fpn_predictions]
                     cls_fpn_predictions = mx.nd.concat(*cls_fpn_predictions, dim=3)
                     reg_fpn_predictions = mx.nd.concat(*reg_fpn_predictions, dim=3)
                     mask_for_cls = targets[:, 0:1]
@@ -369,7 +367,7 @@ def parse_args():
 
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
 
