@@ -233,6 +233,9 @@ def train_net(config):
             for data, gt_boxes, gt_boxes_number in zip(data_list, gt_boxes_list, gt_boxes_number_list):
                 # targets: (2, 86, num_anchors, h x w)
                 fpn_predictions = net(data)
+                import gluoncv
+                fig, axes = plt.subplots(5, 2, squeeze=False)
+                nlayer = 0
                 for stride, base_size, (reg_pred, cls_pred) in zip(config.retinanet.network.FPN_STRIDES,
                                                                    config.retinanet.network.BASE_SIZES,
                                                                    fpn_predictions):
@@ -263,27 +266,29 @@ def train_net(config):
                     rois = rois[0]
                     rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
                     rois = rois[np.where(rois[:, 4] > .1)]
-                    import gluoncv
-                    gluoncv.utils.viz.plot_bbox(data[0], rois[:, :4], rois[:, 4], rois[:, 5])
-                    plt.show()
+                    axes = axes.reshape((5, 2))
+
+                    gluoncv.utils.viz.plot_bbox(data[0], rois[:, :4], rois[:, 4], rois[:, 5], ax=axes[nlayer, 0], class_names=gluoncv.data.COCODetection.CLASSES)
 
                     print(cls_pred.sigmoid().max())
-                    paa_scores = mobula.op.PAAScore(data.as_in_context(mx.cpu()),
-                                                    reg_pred.as_in_context(mx.cpu()),
-                                                    cls_pred.sigmoid().as_in_context(mx.cpu()),
+                    paa_scores = mobula.op.PAAScore(data[0:1].as_in_context(mx.cpu()),
+                                                    reg_pred[0:1].as_in_context(mx.cpu()),
+                                                    cls_pred[0:1].sigmoid().as_in_context(mx.cpu()),
                                                     anchors_base_wh.as_in_context(mx.cpu()),
-                                                    gt_boxes.as_in_context(mx.cpu()),
-                                                    gt_boxes_number.as_in_context(mx.cpu()),
+                                                    gt_boxes[0:1].as_in_context(mx.cpu()),
+                                                    gt_boxes_number[0:1].as_in_context(mx.cpu()),
                                                     number_of_classes=config.dataset.NUM_CLASSES-1, stride=stride)
                     try:
-                        topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=1000)].asnumpy()
-                        plt.hist(topk_scores, 50)
-                        plt.show()
+                        topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=200)].asnumpy()
+                        axes[nlayer, 1].hist(topk_scores, 50)
 
                         print(topk_scores.max())
                         print(topk_scores.min())
                     except Exception:
                         pass
+
+                    nlayer += 1
+            plt.show()
 
             # ag.backward(losses)
             # trainer.step(len(ctx_list))
@@ -335,6 +340,9 @@ def main():
     setattr(mobula.config, "NVCC", args.nvcc)
     mobula.config.SHOW_BUILDING_COMMAND = True
     mobula.config.USING_ASYNC_EXEC = False
+    # mobula.config.HOST_NUM_THREADS = 1
+    # mobula.config.DEBUG=True
+    mobula.config.USING_OPTIMIZATION=False
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
     config.dataset = easydict.EasyDict()
