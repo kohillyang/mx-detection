@@ -8,6 +8,10 @@
 #include <iostream>
 #include <cmath>
 #include "../tensor.hpp"
+//#include <iostream>
+//#include <cstdio>
+//using namespace std;
+
 namespace mobula {
 
 #define UNUSED(expr) do { (void)(expr); } while (0)
@@ -41,7 +45,7 @@ MOBULA_KERNEL  paa_score_kernel(
 	// nbatch, number_of_anchors_times_number_of_classes, feature_h, feature_w
 	parfor(nbatch * number_of_anchors * feature_h * feature_w, [&](int index) {
 		Tensor5D<T> tensor_reg_preds = Tensor5D<T>(pointer_reg_preds, nbatch, number_of_anchors, 4, feature_h, feature_w);
-		Tensor5D<T> tensor_cls_preds = Tensor5D<T>(pointer_reg_preds, nbatch, number_of_anchors, number_of_classes, feature_h, feature_w);
+		Tensor5D<T> tensor_cls_preds = Tensor5D<T>(pointer_cls_preds, nbatch, number_of_anchors, number_of_classes, feature_h, feature_w);
 		Tensor3D<T> tensor_gt_boxes = Tensor3D<T>(pointer_gt_boxes, nbatch, gt_boxes_padded_length, 5);
 		Tensor5D<T> tensor_output = Tensor5D<T>(output, nbatch, number_of_anchors, number_of_classes, feature_h, feature_w);
 		int total_idx = index;
@@ -56,7 +60,7 @@ MOBULA_KERNEL  paa_score_kernel(
 
 		int w_idx = total_idx;
 
-		int gt_boxes_number = static_cast<int>(pointer_anchors_base_wh[batch_idx]);
+		int gt_boxes_number = static_cast<int>(pointer_gt_boxes_number[batch_idx]);
 
 		// for each anchor on a position, we have several bboxes, which share same bbox width and height,
         T anchor_w = pointer_anchors_base_wh[anchor_idx * 2 + 0];
@@ -85,30 +89,30 @@ MOBULA_KERNEL  paa_score_kernel(
         	T max_iou = 0;
         	int max_iou_gt_box_idx = -1;
             for(int gt_box_idx=0; gt_box_idx< gt_boxes_number; gt_box_idx++){
-            	T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0);
-            	T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1);
-            	T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2);
-            	T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3);
+            	T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0) * .1;
+            	T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1) * .1;
+            	T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2) * .2;
+            	T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3) * .2;
             	T gt_class_id =  tensor_gt_boxes(batch_idx, gt_box_idx, 4);
 				if(gt_class_id == class_id){
 					T iou = box_iou(pred_x0, pred_y0, pred_w, pred_h, gt_x0, gt_y0, gt_x1, gt_y1);
-					if(iou > max_iou){
+					if(iou >= max_iou){
 						max_iou = iou;
-						max_iou_gt_box_idx = gt_class_id;
+						max_iou_gt_box_idx = gt_box_idx;
 					}
 				}
             		}
-            if(max_iou_gt_box_idx > 0 ){
+            if(max_iou_gt_box_idx >= 0 ){
             	int gt_box_idx = max_iou_gt_box_idx;
-            	T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0);
-            	T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1);
-            	T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2);
-            	T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3);
+            	T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0) * .1;
+            	T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1) * .1;
+            	T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2) * .2;
+            	T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3) * .2;
             	T gt_class_id =  tensor_gt_boxes(batch_idx, gt_box_idx, 4);
             	T iou = max_iou;
             	T net_score_pred =  tensor_cls_preds(batch_idx, anchor_idx, gt_class_id, h_idx, w_idx);
-            	T score = iou * net_score_pred;
-                tensor_output(batch_idx, anchor_idx, class_id, h_idx, w_idx) = score;;
+            	T score = net_score_pred ;
+            			tensor_output(batch_idx, anchor_idx, class_id, h_idx, w_idx) = score;;
 			}
         }
 	}); // parfor

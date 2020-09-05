@@ -26,6 +26,7 @@ class PAAScore:
         else:
             self.y[:] = 0
             assert gt_boxes.shape[2] == 5
+            print(gt_boxes.shape[1])
             mobula.func.paa_score(stride=self.stride,
                                   image_h=image_h,
                                   image_w=image_w,

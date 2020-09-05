@@ -87,7 +87,7 @@ class RetinaNetTargetPadding(object):
     def __call__(self, image_transposed, bboxes):
         assert len(bboxes) <= self.max_gt_boxes_num
         bboxes = bboxes.copy()
-        bboxes[:, 4] += 1
+        # bboxes[:, 4] += 1
         bboxes_padded = np.zeros(shape=(self.max_gt_boxes_num, bboxes.shape[1]))
         bboxes_padded[:len(bboxes)] = bboxes
         outputs = (image_transposed, bboxes_padded, np.array([len(bboxes)]))
@@ -214,6 +214,7 @@ def train_net(config):
         eval_metrics.add(child_metric)
     mobula.op.load("FocalLoss")
     mobula.op.load('PAAScore', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load('RetinaNetRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
         # net.hybridize(static_alloc=True, static_shape=False)
@@ -228,45 +229,76 @@ def train_net(config):
             losses = []
             losses_loc = []
             losses_cls = []
-            with ag.record():
-                for data, gt_boxes, gt_boxes_number in zip(data_list, gt_boxes_list, gt_boxes_number_list):
-                    # targets: (2, 86, num_anchors, h x w)
-                    fpn_predictions = net(data)
-                    for stride, base_size, (reg_pred, cls_pred) in zip(config.retinanet.network.FPN_STRIDES,
-                                                                       config.retinanet.network.BASE_SIZES,
-                                                                       fpn_predictions):
-                        # cls_pred_reshapped = cls_pred.reshape((cls_pred.shape[0], -1))
-                        # cls_topk_value, cls_topk_indices = mx.nd.topk(cls_pred_reshapped, axis=1, ret_typ="both", k=1000)
-                        scales = config.retinanet.network.SCALES
-                        ratios = config.retinanet.network.RATIOS
-                        anchors = [[(s * np.sqrt(r), s * np.sqrt(1 / r)) for s in scales] for r in ratios]
-                        anchors_base_wh = np.array(anchors) * np.array(base_size)[np.newaxis, np.newaxis, :]
-                        anchors_base_wh = anchors_base_wh.reshape(-1, 2)
-                        anchors_base_wh = mx.nd.array(anchors_base_wh).as_in_context(data.context)
-                        paa_scores = mobula.op.PAAScore(data, reg_pred, cls_pred.sigmoid(), anchors_base_wh,
-                                                       gt_boxes, gt_boxes_number,
-                                                       number_of_classes=config.dataset.NUM_CLASSES-1, stride=stride)
-                        plt.hist(paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=100)].asnumpy(), 10)
+            # with ag.record():
+            for data, gt_boxes, gt_boxes_number in zip(data_list, gt_boxes_list, gt_boxes_number_list):
+                # targets: (2, 86, num_anchors, h x w)
+                fpn_predictions = net(data)
+                for stride, base_size, (reg_pred, cls_pred) in zip(config.retinanet.network.FPN_STRIDES,
+                                                                   config.retinanet.network.BASE_SIZES,
+                                                                   fpn_predictions):
+                    # cls_pred_reshapped = cls_pred.reshape((cls_pred.shape[0], -1))
+                    # cls_topk_value, cls_topk_indices = mx.nd.topk(cls_pred_reshapped, axis=1, ret_typ="both", k=1000)
+                    scales = config.retinanet.network.SCALES
+                    ratios = config.retinanet.network.RATIOS
+                    anchors = [[(s * np.sqrt(r), s * np.sqrt(1 / r)) for s in scales] for r in ratios]
+                    anchors_base_wh = np.array(anchors) * np.array(base_size)[np.newaxis, np.newaxis, :]
+                    anchors_base_wh = anchors_base_wh.reshape(-1, 2)
+                    anchors_base_wh = mx.nd.array(anchors_base_wh).as_in_context(data.context)
+
+                    fpn_prediction = mx.nd.concat(reg_pred[0:1], cls_pred[0:1].sigmoid(), dim=1)
+                    fpn_prediction = fpn_prediction.reshape((0,  fpn_prediction.shape[1] // num_anchors, num_anchors,
+                                                             fpn_prediction.shape[2], fpn_prediction.shape[3]))
+                    fpn_prediction_reshaped_np = fpn_prediction.transpose((0, 3, 4, 2, 1)).asnumpy()
+                    fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
+                    rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
+                                                                     base_size=base_size,
+                                                                     cls_threshold=0,
+                                                                     stride=stride
+                                                                     )(image=data.asnumpy(),
+                                                                       feature=fpn_prediction_reshaped_np)
+                    rois = rois[0]
+                    rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
+                    rois = rois[np.where(rois[:, 4] > .1)]
+                    import gluoncv
+                    gluoncv.utils.viz.plot_bbox(data[0], rois[:, :4], rois[:, 4], rois[:, 5])
+                    plt.show()
+
+                    print(cls_pred.sigmoid().max())
+                    paa_scores = mobula.op.PAAScore(data.as_in_context(mx.cpu()),
+                                                    reg_pred.as_in_context(mx.cpu()),
+                                                    cls_pred.sigmoid().as_in_context(mx.cpu()),
+                                                    anchors_base_wh.as_in_context(mx.cpu()),
+                                                    gt_boxes.as_in_context(mx.cpu()),
+                                                    gt_boxes_number.as_in_context(mx.cpu()),
+                                                    number_of_classes=config.dataset.NUM_CLASSES-1, stride=stride)
+                    try:
+                        topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=1000)].asnumpy()
+                        plt.hist(topk_scores, 50)
                         plt.show()
 
-            ag.backward(losses)
-            trainer.step(len(ctx_list))
-            for l in losses_loc:
-                metric_loss_loc.update(None, l.sum())
-            for l in losses_cls:
-                metric_loss_cls.update(None, l.sum())
-            if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
-                msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
-                msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
-                logging.info(msg)
-                eval_metrics.reset()
+                        print(topk_scores.max())
+                        print(topk_scores.min())
+                    except Exception:
+                        pass
 
-            if trainer.optimizer.num_update % 5000 == 0:
-                save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
-                net.collect_params().save(save_path)
-                logging.info("Saved checkpoint to {}".format(save_path))
-                trainer_path = save_path + "-trainer.states"
-                trainer.save_states(trainer_path)
+            # ag.backward(losses)
+            # trainer.step(len(ctx_list))
+            # for l in losses_loc:
+            #     metric_loss_loc.update(None, l.sum())
+            # for l in losses_cls:
+            #     metric_loss_cls.update(None, l.sum())
+            # if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
+            #     msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
+            #     msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
+            #     logging.info(msg)
+            #     eval_metrics.reset()
+            #
+            # if trainer.optimizer.num_update % 5000 == 0:
+            #     save_path = os.path.join(config.TRAIN.log_path, "{}-{}.params".format(epoch, trainer.optimizer.num_update))
+            #     net.collect_params().save(save_path)
+            #     logging.info("Saved checkpoint to {}".format(save_path))
+            #     trainer_path = save_path + "-trainer.states"
+            #     trainer.save_states(trainer_path)
         save_path = os.path.join(config.TRAIN.log_path, "{}.params".format(epoch))
         net.collect_params().save(save_path)
         logging.info("Saved checkpoint to {}".format(save_path))
