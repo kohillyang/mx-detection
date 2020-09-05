@@ -245,17 +245,21 @@ def train_net(config):
                     anchors_base_wh = anchors_base_wh.reshape(-1, 2)
                     anchors_base_wh = mx.nd.array(anchors_base_wh).as_in_context(data.context)
 
-                    fpn_prediction = mx.nd.concat(reg_pred[0:1], cls_pred[0:1].sigmoid(), dim=1)
-                    fpn_prediction = fpn_prediction.reshape((0,  fpn_prediction.shape[1] // num_anchors, num_anchors,
-                                                             fpn_prediction.shape[2], fpn_prediction.shape[3]))
-                    fpn_prediction_reshaped_np = fpn_prediction.transpose((0, 3, 4, 2, 1)).asnumpy()
-                    fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
+                    reg_prediction = reg_pred[0:1]
+                    cls_prediction = cls_pred[0:1]
+                    reg_prediction = reg_pred.reshape((reg_prediction.shape[0], 4, num_anchors, reg_prediction.shape[2], reg_prediction.shape[3]))
+                    cls_prediction = cls_pred.reshape((cls_prediction.shape[0], cls_prediction.shape[1] // num_anchors, num_anchors,
+                                                             cls_prediction.shape[2], cls_prediction.shape[3]))
+                    cls_prediction_np = cls_prediction.sigmoid().asnumpy()
+                    reg_prediction_np = reg_prediction.asnumpy()
+                    reg_prediction_np *= np.array(config.retinanet.network.bbox_norm_coef)[None, :, None, None, None]
                     rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
                                                                      base_size=base_size,
                                                                      cls_threshold=0,
                                                                      stride=stride
-                                                                     )(image=data.asnumpy(),
-                                                                       feature=fpn_prediction_reshaped_np)
+                                                                     )(data.asnumpy(), reg_prediction_np,
+                                                                       cls_prediction_np)
+
                     rois = rois[0]
                     rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
                     rois = rois[np.where(rois[:, 4] > .1)]

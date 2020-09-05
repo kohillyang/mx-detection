@@ -21,38 +21,33 @@ class RetinaNetRegression:
         self.number_of_classes = number_of_classes
         self.cls_threshold=cls_threshold
 
-    def forward(self, image, feature):
+    def forward(self, image, reg_preds, cls_preds):
         if self.req[0] == req.null:
             return
-        out = self.y
         nbatch, image_h, image_w, image_c = image.shape
-        nbatch, feature_h, feature_w, number_of_anchors, out_c = feature.shape
+        nbatch, _, number_of_anchors, feature_h, feature_w = reg_preds.shape
+        nbatch, number_of_classes, number_of_anchors, feature_h, feature_w = cls_preds.shape
+
         assert nbatch == 1
         if self.req[0] == req.add:
-            out_temp = self.F.zeros_like(out)
-            mobula.func.retinanet_regression(image_h=image_h, image_w=image_w,
-                                             n_batch=nbatch, feature_h=feature_h, feature_w=feature_w,
-                                             n_anchor=number_of_anchors, n_ch=out_c, feature=feature,
-                                             stride=self.stride,
-                                             anchors_base_wh=self.anchors_base_wh,
-                                             anchors_base_wh_size=self.anchors_base_wh.shape[0],
-                                             cls_threshold=self.cls_threshold,
-                                             output=out_temp)
-            self.y[:] += out_temp
+            assert False
         else:
             self.y[:] = 0
             mobula.func.retinanet_regression(image_h=image_h, image_w=image_w,
                                              n_batch=nbatch, feature_h=feature_h, feature_w=feature_w,
-                                             n_anchor=number_of_anchors, n_ch=out_c, feature=feature,
+                                             n_anchor=number_of_anchors,
+                                             number_of_classes = number_of_classes,
+                                             pointer_reg_preds=reg_preds,
+                                             pointer_cls_preds=cls_preds,
                                              stride=self.stride,
                                              anchors_base_wh=self.anchors_base_wh,
                                              anchors_base_wh_size=self.anchors_base_wh.shape[0],
                                              cls_threshold=self.cls_threshold,
                                              output=self.y)
 
-    def backward(self):
+    def backward(self, y):
         pass    # nothing need to do
 
     def infer_shape(self, in_shape):
-        nbatch, feature_h, feature_w, number_of_anchors, out_c = in_shape[1]
-        return in_shape, [(nbatch, feature_h * feature_w * (out_c - 4) * number_of_anchors, 6)]
+        nbatch, number_of_classes, number_of_anchors, feature_h, feature_w = in_shape[2]
+        return in_shape, [(nbatch, feature_h * feature_w * number_of_classes * number_of_anchors, 6)]

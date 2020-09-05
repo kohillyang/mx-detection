@@ -411,7 +411,7 @@ def main():
 
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.sync_bn = False
+    config.network.sync_bn = True
     config.network.use_global_stats = False if config.network.sync_bn else True
     config.network.merge_backbone_bn = False
 
@@ -438,25 +438,21 @@ def inference_one_image(config, net, ctx, image_path):
     fpn_predictions = net(data)
     bboxes_pred_list = []
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
-    num_reg_channels = 4 * num_anchors
-    cls_fpn_predictions = [
-        x[:, num_reg_channels:].reshape(x.shape[0], -1, num_anchors, x.shape[2], x.shape[3]).sigmoid()
-        for x in fpn_predictions]
-    reg_fpn_predictions = [x[:, :num_reg_channels].reshape(x.shape[0], -1, num_anchors, x.shape[2], x.shape[3])
-                           for x in fpn_predictions]
-    for reg_prediction, cls_prediction, base_size, stride in zip(reg_fpn_predictions,
-                                                                 cls_fpn_predictions,
+    for reg_prediction, cls_prediction, base_size, stride in zip([x[0] for x in fpn_predictions],
+                                                                 [x[1] for x in fpn_predictions],
                                                                  config.retinanet.network.BASE_SIZES,
                                                                  config.retinanet.network.FPN_STRIDES):
-        fpn_prediction = mx.nd.concat(reg_prediction, cls_prediction, dim=1)
-        fpn_prediction_reshaped_np = fpn_prediction.transpose((0, 3, 4, 2, 1)).asnumpy()
-        fpn_prediction_reshaped_np[:, :, :, :, :4] *= np.array(config.retinanet.network.bbox_norm_coef)[None, None, None, None]
+        reg_prediction = reg_prediction.reshape((reg_prediction.shape[0], 4, num_anchors, reg_prediction.shape[2], reg_prediction.shape[3]))
+        cls_prediction = cls_prediction.reshape((cls_prediction.shape[0], cls_prediction.shape[1] // num_anchors, num_anchors, cls_prediction.shape[2], cls_prediction.shape[3]))
+        cls_prediction_np = cls_prediction.sigmoid().asnumpy()
+        reg_prediction_np = reg_prediction.asnumpy()
+        reg_prediction_np *= np.array(config.retinanet.network.bbox_norm_coef)[None, :, None, None, None]
+        print(1+1)
         rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
                                                          base_size=base_size,
                                                          cls_threshold=0,
                                                          stride=stride
-                                                         )(image=data.asnumpy(),
-                                                           feature=fpn_prediction_reshaped_np)
+                                                         )(data.asnumpy(), reg_prediction_np, cls_prediction_np)
         rois = rois[0]
         rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
         bboxes_pred_list.append(rois)
