@@ -2,6 +2,9 @@ from __future__ import print_function
 
 import logging
 import os
+
+os.environ["MXNET_ENGINE_TYPE"] = "NaiveEngine"
+
 import pprint
 import sys
 import argparse
@@ -22,7 +25,6 @@ from utils.common import log_init
 from data.bbox.bbox_dataset import AspectGroupingDataset
 
 import mobula
-mobula.op.load('RetinaNetRegressionCUDA', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
 
 def batch_fn(x):
@@ -86,10 +88,9 @@ class RetinaNetTargetPadding(object):
         assert len(bboxes) <= self.max_gt_boxes_num
         bboxes = bboxes.copy()
         bboxes[:, 4] += 1
-        bboxes_padded = np.zeros(shape=(self.max_gt_boxes_num + 1, bboxes.shape[1]))
-        bboxes_padded[-1, 0] = len(bboxes)
+        bboxes_padded = np.zeros(shape=(self.max_gt_boxes_num, bboxes.shape[1]))
         bboxes_padded[:len(bboxes)] = bboxes
-        outputs = [image_transposed, bboxes_padded]
+        outputs = (image_transposed, bboxes_padded, np.array([len(bboxes)]))
         return outputs
 
 
@@ -107,20 +108,23 @@ def train_net(config):
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     from utils import graph_optimize
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    if config.network.merge_backbone_bn:
-        net = graph_optimize.merge_gluon_hybrid_block_bn(net, (1, 368, 368, 3))
+    # if config.network.merge_backbone_bn:
+    #     net = graph_optimize.merge_gluon_hybrid_block_bn(net, (1, 368, 368, 3))
 
     # Resume parameters.
-    resume = None
+    resume = "pretrained/retinanet/8-325000.params"
     if resume is not None:
         params_coco = mx.nd.load(resume)
+        params_local_mapped = {}
         for k in params_coco:
-            params_coco[k.replace("arg:", "").replace("aux:", "")] = params_coco.pop(k)
+            params_local_mapped[k.replace("arg:", "").replace("aux:", "").replace("sync", "")] = params_coco[k]
+
         params = net.collect_params()
 
         for k in params.keys():
             try:
-                params[k]._load_init(params_coco[k.replace('resnet0_', '')], ctx=mx.cpu())
+                pp = params_local_mapped[k]
+                params[k]._load_init(pp, ctx=mx.cpu())
                 print("success load {}".format(k))
             except Exception as e:
                 logging.exception(e)
@@ -152,7 +156,7 @@ def train_net(config):
     if config.TRAIN.aspect_grouping:
         if config.dataset.dataset_type == "coco":
             from data.bbox.mscoco import COCODetection
-            base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
+            base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_val2017",),
                                                h_flip=config.TRAIN.FLIP, transform=None)
         elif config.dataset.dataset_type == "voc":
             from data.bbox.voc import VOCDetection
@@ -164,7 +168,7 @@ def train_net(config):
         train_dataset = AspectGroupingDataset(base_train_dataset, config,
                                               target_generator=RetinaNetTargetPadding(config))
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
-                                                num_workers=12, last_batch="discard", shuffle=True, thread_pool=False)
+                                                num_workers=0, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         assert False
     params_all = net.collect_params()
@@ -209,30 +213,42 @@ def train_net(config):
     for child_metric in [metric_loss_loc, metric_loss_cls]:
         eval_metrics.add(child_metric)
     mobula.op.load("FocalLoss")
+    mobula.op.load('PAAScore', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
-        net.hybridize(static_alloc=True, static_shape=False)
-        for ctx in ctx_list:
-            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
-            del _
-        mx.nd.waitall()
+        # net.hybridize(static_alloc=True, static_shape=False)
+        # for ctx in ctx_list:
+        #     _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+        #     del _
+        # mx.nd.waitall()
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
-            data_list = mx.gluon.utils.split_and_load(data_batch[0][0], ctx_list=ctx_list, batch_axis=0)
-            targets_list = mx.gluon.utils.split_and_load(data_batch[0][1], ctx_list=ctx_list, batch_axis=0)
+            data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][0]), ctx_list=ctx_list, batch_axis=0)
+            gt_boxes_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][1]), ctx_list=ctx_list, batch_axis=0)
+            gt_boxes_number_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][2]), ctx_list=ctx_list, batch_axis=0)
             losses = []
             losses_loc = []
             losses_cls = []
             with ag.record():
-                for data, targets in zip(data_list, targets_list):
+                for data, gt_boxes, gt_boxes_number in zip(data_list, gt_boxes_list, gt_boxes_number_list):
                     # targets: (2, 86, num_anchors, h x w)
                     fpn_predictions = net(data)
-                    for stride, base_size, (pred_cls, pred_reg) in zip(config.retinanet.network.FPN_STRIDES,
+                    for stride, base_size, (reg_pred, cls_pred) in zip(config.retinanet.network.FPN_STRIDES,
                                                                        config.retinanet.network.BASE_SIZES,
                                                                        fpn_predictions):
-                        reg_kwargs = {"number_of_classes": config.dataset.NUM_CLASSES, "base_size": base_size,
-                                      "ratios": config.retinanet.network.RATIOS,
-                                      "scales": config.retinanet.network.SCALES,
-                                      "topk": config.TRAIN.top_k_per_fpn_layer}
-                        bbox_pred_per_fpn_layer = mobula.op.RetinaNetRegressionCUDA(pred_cls, pred_reg, **reg_kwargs)
+                        # cls_pred_reshapped = cls_pred.reshape((cls_pred.shape[0], -1))
+                        # cls_topk_value, cls_topk_indices = mx.nd.topk(cls_pred_reshapped, axis=1, ret_typ="both", k=1000)
+                        scales = config.retinanet.network.SCALES
+                        ratios = config.retinanet.network.RATIOS
+                        anchors = [[(s * np.sqrt(r), s * np.sqrt(1 / r)) for s in scales] for r in ratios]
+                        anchors_base_wh = np.array(anchors) * np.array(base_size)[np.newaxis, np.newaxis, :]
+                        anchors_base_wh = anchors_base_wh.reshape(-1, 2)
+                        anchors_base_wh = mx.nd.array(anchors_base_wh).as_in_context(data.context)
+                        paa_scores = mobula.op.PAAScore(data, reg_pred, cls_pred.sigmoid(), anchors_base_wh,
+                                                       gt_boxes, gt_boxes_number,
+                                                       number_of_classes=config.dataset.NUM_CLASSES-1, stride=stride)
+                        plt.hist(paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=100)].asnumpy(), 10)
+                        plt.show()
+
             ag.backward(losses)
             trainer.step(len(ctx_list))
             for l in losses_loc:
@@ -265,7 +281,7 @@ def parse_args():
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
     parser.add_argument('--demo', help='demo', action="store_true")
-    parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
+    parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.1/bin/nvcc")
 
     args_known = parser.parse_known_args()[0]
     if args_known.demo:
@@ -281,7 +297,8 @@ def main():
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
-
+    mobula.config.SHOW_BUILDING_COMMAND = True
+    mobula.config.USING_ASYNC_EXEC = False
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
     config.dataset = easydict.EasyDict()

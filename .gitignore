@@ -44,3 +44,6 @@ utils/operator_cxx/IoULoss/mobula_op.hash.cache
 utils/operator_cxx/FCOSTargetGenerator/mobula_op.hash.cache
 
 utils/operator_cxx/RetinaNetTargetGenerator/mobula_op.hash.cache
+
+utils/operator_cxx/PAAScore/build
+utils/operator_cxx/PAAScore/mobula_op.hash.cache
