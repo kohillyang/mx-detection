@@ -273,13 +273,16 @@ def train_net(config):
                     gluoncv.utils.viz.plot_bbox(data[0], rois[:, :4], rois[:, 4], rois[:, 5], ax=axes[nlayer, 0], class_names=gluoncv.data.COCODetection.CLASSES)
 
                     print(cls_pred.sigmoid().max())
-                    paa_scores = mobula.op.PAAScore(data[0:1].as_in_context(mx.cpu()),
-                                                    reg_pred[0:1].as_in_context(mx.cpu()),
-                                                    cls_pred[0:1].sigmoid().as_in_context(mx.cpu()),
-                                                    anchors_base_wh.as_in_context(mx.cpu()),
-                                                    gt_boxes[0:1].as_in_context(mx.cpu()),
-                                                    gt_boxes_number[0:1].as_in_context(mx.cpu()),
-                                                    number_of_classes=config.dataset.NUM_CLASSES-1, stride=stride)
+                    bbox_norm_coef = mx.nd.array(config.retinanet.network.bbox_norm_coef).as_in_context(mx.cpu())
+                    paa_scores_and_gt_indices = mobula.op.PAAScore(data[0:1].as_in_context(mx.cpu()),
+                                                                   reg_pred[0:1].as_in_context(mx.cpu()),
+                                                                   cls_pred[0:1].sigmoid().as_in_context(mx.cpu()),
+                                                                   anchors_base_wh.as_in_context(mx.cpu()),
+                                                                   gt_boxes[0:1].as_in_context(mx.cpu()),
+                                                                   gt_boxes_number[0:1].as_in_context(mx.cpu()),
+                                                                   bbox_norm_coef,
+                                                                   stride=stride)
+                    paa_scores = paa_scores_and_gt_indices[:, 0]
                     try:
                         topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=25)].asnumpy()
                         topk_scores_list.append(topk_scores)

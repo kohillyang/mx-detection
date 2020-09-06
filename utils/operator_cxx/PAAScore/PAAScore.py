@@ -7,11 +7,10 @@ import numpy as np
 
 @mobula.op.register
 class PAAScore:
-    def __init__(self, number_of_classes, stride):
+    def __init__(self,  stride):
         self.stride = stride
-        self.number_of_classes = number_of_classes
 
-    def forward(self, image, reg_preds, cls_preds, anchors_base_wh, gt_boxes, gt_boxes_number):
+    def forward(self, image, reg_preds, cls_preds, anchors_base_wh, gt_boxes, gt_boxes_number, bbox_norm_coef):
         if self.req[0] == req.null:
             return
         out = self.y
@@ -25,6 +24,7 @@ class PAAScore:
             assert False
         else:
             self.y[:] = 0
+            self.y[:, 1] = -1
             assert gt_boxes.shape[2] == 5
             print(gt_boxes.shape[1])
             mobula.func.paa_score(stride=self.stride,
@@ -41,10 +41,14 @@ class PAAScore:
                                   pointer_gt_boxes=gt_boxes,
                                   pointer_gt_boxes_number=gt_boxes_number,
                                   pointer_anchors_base_wh=anchors_base_wh,
+                                  pointer_bbox_norm_coef=bbox_norm_coef,
                                   output=self.y)
 
     def backward(self, y):
         pass    # nothing need to do
 
     def infer_shape(self, in_shape):
-        return in_shape, [in_shape[2]]
+        nbatch, number_of_anchors_times_4, feature_h, feature_w = in_shape[1]
+        number_of_anchors = number_of_anchors_times_4 // 4
+        nbatch, number_of_anchors_times_number_of_classes, feature_h, feature_w = in_shape[2]
+        return in_shape, [[nbatch, 2, number_of_anchors, feature_h, feature_w]]
