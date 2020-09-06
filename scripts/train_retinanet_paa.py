@@ -236,6 +236,8 @@ def train_net(config):
                 import gluoncv
                 fig, axes = plt.subplots(5, 2, squeeze=False)
                 nlayer = 0
+                print(gt_boxes[0])
+                topk_scores_list = []
                 for stride, base_size, (reg_pred, cls_pred) in zip(config.retinanet.network.FPN_STRIDES,
                                                                    config.retinanet.network.BASE_SIZES,
                                                                    fpn_predictions):
@@ -279,15 +281,16 @@ def train_net(config):
                                                     gt_boxes_number[0:1].as_in_context(mx.cpu()),
                                                     number_of_classes=config.dataset.NUM_CLASSES-1, stride=stride)
                     try:
-                        topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=200)].asnumpy()
-                        axes[nlayer, 1].hist(topk_scores, 50)
-
-                        print(topk_scores.max())
-                        print(topk_scores.min())
+                        topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=25)].asnumpy()
+                        topk_scores_list.append(topk_scores)
                     except Exception:
                         pass
 
                     nlayer += 1
+            topk_scores = np.concatenate(topk_scores_list, axis=0)
+            topk_scores = topk_scores[np.where(topk_scores > 0)]
+            axes[0, 1].hist(topk_scores, 25)
+
             plt.show()
 
             # ag.backward(losses)
@@ -340,8 +343,8 @@ def main():
     setattr(mobula.config, "NVCC", args.nvcc)
     mobula.config.SHOW_BUILDING_COMMAND = True
     mobula.config.USING_ASYNC_EXEC = False
-    # mobula.config.HOST_NUM_THREADS = 1
-    # mobula.config.DEBUG=True
+    mobula.config.HOST_NUM_THREADS = 1
+    mobula.config.DEBUG=True
     mobula.config.USING_OPTIMIZATION=False
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]

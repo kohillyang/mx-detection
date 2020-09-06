@@ -84,33 +84,35 @@ MOBULA_FUNC void paa_score(
         T pred_y0 = net_pred_1 * (anchor_y1 - anchor_y0 + 1) + anchor_y0;
         T pred_w = exp(net_pred_2 + log(anchor_x1 - anchor_x0));
         T pred_h = exp(net_pred_3 + log(anchor_y1 - anchor_y0));
+        T pred_x1 = pred_x0 + pred_w - 1;
+        T pred_y1 = pred_y0 + pred_h - 1;
         	// There maybe more than one gt_boxes with the same class, we choose the one with the max iou.
-		T max_iou = 0;
-		int max_iou_gt_box_idx = -1;
-		for(int gt_box_idx=0; gt_box_idx< gt_boxes_number; gt_box_idx++){
-			T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0);
-			T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1);
-			T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2);
-			T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3);
-			T gt_class_id =  tensor_gt_boxes(batch_idx, gt_box_idx, 4);
-			T iou = box_iou(pred_x0, pred_y0, pred_w, pred_h, gt_x0, gt_y0, gt_x1, gt_y1);
-			if(iou >= max_iou){
-				max_iou = iou;
-				max_iou_gt_box_idx = gt_box_idx;
-			}
-		}
-		if(max_iou_gt_box_idx >= 0 ){
-			int gt_box_idx = max_iou_gt_box_idx;
-			T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0) ;
-			T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1) ;
-			T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2) ;
-			T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3) ;
-			T gt_class_id =  tensor_gt_boxes(batch_idx, gt_box_idx, 4);
-			T iou = max_iou;
-			T net_score_pred =  tensor_cls_preds(batch_idx, gt_class_id, anchor_idx, h_idx, w_idx);
-			T score = iou * net_score_pred;
-			tensor_output(batch_idx, gt_class_id, anchor_idx, h_idx, w_idx) = score;;
-		}
+        for(int class_idx = 0; class_idx  < number_of_classes; ++class_idx){
+            T max_iou = 0;
+            int max_iou_gt_box_idx = -1;
+            for(int gt_box_idx=0; gt_box_idx< gt_boxes_number; gt_box_idx++){
+                T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0);
+                T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1);
+                T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2);
+                T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3);
+                T gt_class_id =  tensor_gt_boxes(batch_idx, gt_box_idx, 4);
+                T iou = box_iou(pred_x0, pred_y0, pred_x1, pred_y1, gt_x0, gt_y0, gt_x1, gt_y1);
+                if(gt_class_id == class_idx && iou >= max_iou){
+                                    max_iou = iou;
+                                    max_iou_gt_box_idx = gt_box_idx;
+                            }
+                        }
+            if(max_iou_gt_box_idx >= 0 && max_iou > 0){
+                int gt_box_idx = max_iou_gt_box_idx;
+                T gt_x0 = tensor_gt_boxes(batch_idx, gt_box_idx, 0) ;
+                T gt_y0 = tensor_gt_boxes(batch_idx, gt_box_idx, 1) ;
+                T gt_x1 = tensor_gt_boxes(batch_idx, gt_box_idx, 2) ;
+                T gt_y1 = tensor_gt_boxes(batch_idx, gt_box_idx, 3) ;
+                T gt_class_id =  tensor_gt_boxes(batch_idx, gt_box_idx, 4);
+                T net_score_pred =  tensor_cls_preds(batch_idx, gt_class_id, anchor_idx, h_idx, w_idx);
+                            tensor_output(batch_idx, gt_class_id, anchor_idx, h_idx, w_idx) = max_iou * net_score_pred; // paa score
+                    }
+             }
 	}); // parfor
 
 } // paa_score_kernel
