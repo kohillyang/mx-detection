@@ -16,8 +16,8 @@ import tqdm
 
 from data.bbox.bbox_dataset import AspectGroupingDataset
 from utils.common import log_init
-from models.backbones.resnet import ResNetV1B
-
+# from models.backbones.resnet import ResNetV1B
+from models.backbones.dcn_resnet.resnet import ResNetV1B
 
 def load_mobula_ops():
     logging.info(mobula.__path__)
@@ -494,7 +494,7 @@ def inference_one_image(config, net, ctx, image_path):
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
     if len(bboxes_pred > 0):
         cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
-                                         overlap_thresh=.5, coord_start=0, score_index=4, id_index=-1,
+                                         overlap_thresh=.6, coord_start=0, score_index=4, id_index=-1,
                                          force_suppress=True, in_format='corner',
                                          out_format='corner').asnumpy()
         cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
