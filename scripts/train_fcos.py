@@ -398,7 +398,7 @@ def main():
     os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
     os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
     os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     load_mobula_ops()
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
@@ -433,7 +433,7 @@ def main():
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1333
+    config.TRAIN.image_max_long_size = 1000
 
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
