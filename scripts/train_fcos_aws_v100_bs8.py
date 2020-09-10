@@ -311,8 +311,8 @@ def train_net(config):
                 data_list = [data_batch[0].as_in_context(ctx_list[0])]
                 targets_list = [data_batch[1].as_in_context(ctx_list[0])]
             else:
-                data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][0]), ctx_list=ctx_list, batch_axis=0)
-                targets_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][1]), ctx_list=ctx_list, batch_axis=0)
+                data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0]), ctx_list=ctx_list, batch_axis=0)
+                targets_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[1]), ctx_list=ctx_list, batch_axis=0)
 
             losses_loc = []
             losses_center_ness = []
