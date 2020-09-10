@@ -232,7 +232,7 @@ def train_net(config):
         train_dataset = SplitDataset(train_dataset, local_size=hvd.local_size(), local_rank=hvd.local_rank())
 
     train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1,
-                                            num_workers=8, last_batch="discard", shuffle=True,
+                                            num_workers=24, last_batch="discard", shuffle=True,
                                             thread_pool=False, batchify_fn=batch_fn)
 
     params_all = net.collect_params()
@@ -378,7 +378,7 @@ def parse_args():
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.1/bin/nvcc")
     parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
-                        required=False, type=int, default=2)
+                        required=False, type=int, default=3)
 
     parser.add_argument('--demo', help='demo', action="store_true")
     args_known = parser.parse_known_args()[0]
