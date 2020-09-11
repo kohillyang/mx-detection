@@ -49,7 +49,7 @@ class COCODetection(DetectionDataset):
         if not isinstance(image, np.ndarray):
             image = image.asnumpy()
         if self._h_flip:
-            if idx > len(self.coco_dataset):
+            if idx >= len(self.coco_dataset):
                 image = image[:, ::-1, :]
                 w = image.shape[1]
                 bbox[:, (0, 2)] = w - 1 - bbox[:, (2, 0)]

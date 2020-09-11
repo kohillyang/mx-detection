@@ -16,8 +16,50 @@ import tqdm
 
 from data.bbox.bbox_dataset import AspectGroupingDataset
 from utils.common import log_init
-# from models.backbones.resnet import ResNetV1B
-from models.backbones.dcn_resnet.resnet import ResNetV1B
+from models.backbones.resnet import ResNetV1B
+# from models.backbones.dcn_resnet.resnet import ResNetV1B
+
+
+class IoULoss(mx.gluon.nn.Block):
+    def __init__(self):
+        super(IoULoss, self).__init__()
+
+    def max(self, *args):
+        if len(args) == 1:
+            return args[0]
+        else:
+            maximum = args[0]
+            for arg in args[1:]:
+                maximum = mx.nd.maximum(maximum, arg)
+            return maximum
+
+    def forward(self, prediction_bbox, target_bbox):
+        assert prediction_bbox.shape[1] == 4
+        assert target_bbox.shape[1] == 4
+        prediction_bbox = mx.nd.clip(prediction_bbox, 0, 4096)
+
+        l, t, r, b = 0, 1, 2, 3 # l, t, r, b
+        # tl = target_bbox[:, t] + target_bbox[:, l]
+        # tr = target_bbox[:, t] + target_bbox[:, r]
+        # bl = target_bbox[:, b] + target_bbox[:, l]
+        # br = target_bbox[:, b] + target_bbox[:, r]
+        lr = target_bbox[:, l] + target_bbox[:, r]
+        tb = target_bbox[:, t] + target_bbox[:, b]
+
+        lr_hat = prediction_bbox[:, l] + prediction_bbox[:, r]
+        tb_hat = prediction_bbox[:, t] + prediction_bbox[:, b]
+
+        x_t_i = mx.nd.minimum(target_bbox[:, t], prediction_bbox[:, t])
+        x_b_i = mx.nd.minimum(target_bbox[:, b], prediction_bbox[:, b])
+        x_l_i = mx.nd.minimum(target_bbox[:, l], prediction_bbox[:, l])
+        x_r_i = mx.nd.minimum(target_bbox[:, r], prediction_bbox[:, r])
+
+        I = (x_l_i + x_r_i) * (x_b_i + x_t_i)
+        X = lr * tb
+        X_hat = lr_hat * tb_hat
+        I_over_U = (I + 1) / (X + X_hat - I + 1)
+        return -(I_over_U).log()
+
 
 def load_mobula_ops():
     logging.info(mobula.__path__)
@@ -49,7 +91,7 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
         fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, mode="like", like=fpn_p3_1x1)
         fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
 
-        p6 = self.fpn_p6_3x3(F.relu(fpn_p5_1x1))
+        p6 = self.fpn_p6_3x3(res5)
         p7 = self.fpn_p7_3x3(F.relu(p6))
 
         return fpn_p3_plus, fpn_p4_plus, fpn_p5_1x1, p6, p7
@@ -97,20 +139,20 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         self.fcos_head = FCOS_Head(num_classes)
         with self.name_scope():
             self.scale0 = self.params.get('scale0', shape=[1, 1, 1, 1],
-                                          init=mx.init.One(),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='write')
+                                          init=mx.init.Constant(8),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='null')
             self.scale1 = self.params.get('scale1', shape=[1, 1, 1, 1],
-                                          init=mx.init.One(),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='write')
+                                          init=mx.init.Constant(16),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='null')
             self.scale2 = self.params.get('scale2', shape=[1, 1, 1, 1],
-                                          init=mx.init.One(),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='write')
+                                          init=mx.init.Constant(32),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='null')
             self.scale3 = self.params.get('scale3', shape=[1, 1, 1, 1],
-                                          init=mx.init.One(),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='write')
+                                          init=mx.init.Constant(64),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='null')
             self.scale4 = self.params.get('scale4', shape=[1, 1, 1, 1],
-                                          init=mx.init.One(),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='write')
+                                          init=mx.init.Constant(128),  # mx.nd.array(),
+                                          allow_deferred_init=False, grad_req='null')
 
     def hybrid_forward(self, F, x, scale0, scale1, scale2, scale3, scale4):
         # typically the strides are (4, 8, 16, 32, 64)
@@ -322,9 +364,10 @@ def train_net(config):
                     fpn_predictions = net(data)
                     preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
                     num_pos = targets[:, 0].sum() + 1
-                    iou_loss = mobula.op.IoULoss(preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4)),
-                                                 targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
-                                                 ) * targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1)) / (targets[:, 5].sum() + 1)
+                    # iou_loss = mobula.op.IoULoss(preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4)),
+                    #                              targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
+                    #                              ) * targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1)) / (targets[:, 5].sum() + 1)
+                    iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
                     loss_center = mobula.op.BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=preds[:, 5:], targets=targets[:, 6:]) / num_pos
@@ -349,7 +392,7 @@ def train_net(config):
                     metric_loss_center.update(None, l.sum())
                 for l in losses_cls:
                     metric_loss_cls.update(None, l.sum())
-                if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
+                if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:  #
                     msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                     msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                     logging.info(msg)
@@ -457,7 +500,7 @@ def main():
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
 
     config.TRAIN.log_path = "output/{}/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
-        "FCOS",
+        "FCOS-res5-p5",
         "fp16" if config.TRAIN.USE_FP16 else "fp32",
         "sync_bn" if config.network.sync_bn else "normal_bn",
         "hvd" if config.use_hvd else "",
@@ -495,7 +538,7 @@ def inference_one_image(config, net, ctx, image_path):
     if len(bboxes_pred > 0):
         cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
                                          overlap_thresh=.6, coord_start=0, score_index=4, id_index=-1,
-                                         force_suppress=True, in_format='corner',
+                                         force_suppress=False, in_format='corner',
                                          out_format='corner').asnumpy()
         cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
         cls_dets[:, :4] /= fscale
