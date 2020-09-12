@@ -128,7 +128,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
         x_loc = F.broadcast_mul(self.feat_reg_loc(feat_reg), scale)
         x_centerness = self.feat_reg_centerness(feat_reg)
         x_cls = self.feat_cls(x)
-        x = F.concat(x_loc, x_centerness, x_cls, dim=1)
+        x = F.concat(x_loc, x_centerness, dim=1), x_cls
         return x
 
 
@@ -159,9 +159,18 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         scales = [scale0, scale1, scale2, scale3, scale4]
         x = self.backbone(x)
         if isinstance(x, list) or isinstance(x, tuple):
-            return [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
+            outputs = [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
         else:
-            return [self.fcos_head(x)]
+            outputs = [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
+        loc_outputs = [x[0] for x in outputs]
+        loc_outputs = [x.reshape((0, 0, -1)) for x in loc_outputs]
+        loc_outputs = F.concat(*loc_outputs, dim=2)
+
+        cls_outputs = [x[1] for x in outputs]
+        cls_outputs = [x.reshape((0, 0, -1)) for x in cls_outputs]
+        cls_outputs = F.concat(*cls_outputs, dim=2)
+
+        return loc_outputs, cls_outputs
 
 
 def batch_fn(x):
@@ -365,16 +374,15 @@ def train_net(config):
             losses_cls=[]
             with ag.record():
                 for data, targets in zip(data_list, targets_list):
-                    fpn_predictions = net(data)
-                    preds = mx.nd.concat(*[x.reshape((0, 0, -1)) for x in fpn_predictions], dim=2)
+                    loc_preds, cls_preds = net(data)
                     num_pos = targets[:, 0].sum() + 1
                     # iou_loss = mobula.op.IoULoss(preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4)),
                     #                              targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
                     #                              ) * targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1)) / (targets[:, 5].sum() + 1)
-                    iou_loss = IoULoss()(preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
-                    loss_center = mobula.op.BCELoss(preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
+                    iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
+                    loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
                     # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
-                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=preds[:, 5:], targets=targets[:, 6:]) / num_pos
+                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
                     if config.TRAIN.USE_FP16:
                         with amp.scale_loss(loss_total, trainer) as scaled_losses:
