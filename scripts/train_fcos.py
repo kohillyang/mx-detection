@@ -140,19 +140,19 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         with self.name_scope():
             self.scale0 = self.params.get('scale0', shape=[1, 1, 1, 1],
                                           init=mx.init.Constant(8),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='null')
+                                          allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale1 = self.params.get('scale1', shape=[1, 1, 1, 1],
                                           init=mx.init.Constant(16),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='null')
+                                          allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale2 = self.params.get('scale2', shape=[1, 1, 1, 1],
                                           init=mx.init.Constant(32),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='null')
+                                          allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale3 = self.params.get('scale3', shape=[1, 1, 1, 1],
                                           init=mx.init.Constant(64),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='null')
+                                          allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale4 = self.params.get('scale4', shape=[1, 1, 1, 1],
                                           init=mx.init.Constant(128),  # mx.nd.array(),
-                                          allow_deferred_init=False, grad_req='null')
+                                          allow_deferred_init=False, grad_req='write', wd_mult=0)
 
     def hybrid_forward(self, F, x, scale0, scale1, scale2, scale3, scale4):
         # typically the strides are (4, 8, 16, 32, 64)
@@ -353,8 +353,12 @@ def train_net(config):
                 data_list = [data_batch[0].as_in_context(ctx_list[0])]
                 targets_list = [data_batch[1].as_in_context(ctx_list[0])]
             else:
-                data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][0]), ctx_list=ctx_list, batch_axis=0)
-                targets_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][1]), ctx_list=ctx_list, batch_axis=0)
+                if isinstance(data_batch[0], mx.nd.NDArray):
+                    data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0]), ctx_list=ctx_list, batch_axis=0)
+                    targets_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[1]), ctx_list=ctx_list, batch_axis=0)
+                else:
+                    data_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][0]), ctx_list=ctx_list, batch_axis=0)
+                    targets_list = mx.gluon.utils.split_and_load(mx.nd.array(data_batch[0][1]), ctx_list=ctx_list, batch_axis=0)
 
             losses_loc = []
             losses_center_ness = []
@@ -417,7 +421,7 @@ def parse_args():
     parser.add_argument('--dataset-type', help='voc or coco', required=False, type=str, default="coco")
     parser.add_argument('--num-classes', help='num-classes', required=False, type=int, default=81)
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
-    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="2,3")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1,2,3")
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
     parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
@@ -476,7 +480,7 @@ def main():
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
     config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1000
+    config.TRAIN.image_max_long_size = 1333
 
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
@@ -493,8 +497,8 @@ def main():
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.use_global_stats = True
-    config.network.sync_bn = False
+    config.network.use_global_stats = False
+    config.network.sync_bn = True
     config.network.fpn_neck_feature_dim = 256
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
