@@ -349,8 +349,11 @@ def train_net(config):
 
     net.hybridize(static_alloc=True, static_shape=False)
     for ctx in ctx_list:
-        _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+        with ag.record():
+            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+        ag.backward(_)
         del _
+        net.collect_params().zero_grad()
     mx.nd.waitall()
 
     while trainer.optimizer.num_update <= config.TRAIN.end_epoch * len(train_loader):
@@ -433,7 +436,7 @@ def parse_args():
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
     parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
-                        required=False, type=int, default=2)
+                        required=False, type=int, default=3)
 
     parser.add_argument('--demo', help='demo', action="store_true")
     args_known = parser.parse_known_args()[0]
@@ -447,12 +450,6 @@ def parse_args():
 
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT'] = '0'
-    os.environ['MXNET_GPU_MEM_POOL_ROUND_LINEAR_CUTOFF'] = '26'
-    os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_FWD'] = '999'
-    os.environ['MXNET_EXEC_BULK_EXEC_MAX_NODE_TRAIN_BWD'] = '25'
-    os.environ['MXNET_GPU_COPY_NTHREADS'] = '1'
-    os.environ['MXNET_OPTIMIZER_AGGREGATION_SIZE'] = '54'
     # os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
     load_mobula_ops()
     args = parse_args()
