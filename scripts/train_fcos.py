@@ -439,6 +439,7 @@ def parse_args():
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
     parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
                         required=False, type=int, default=3)
+    parser.add_argument('--extra-flag', help='Extra flag when saving model.', required=False, type=str, default="")
 
     parser.add_argument('--demo', help='demo', action="store_true")
     args_known = parser.parse_known_args()[0]
@@ -511,7 +512,7 @@ def main():
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
 
     config.TRAIN.log_path = "output/{}/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
-        "FCOS-res5-p5",
+        "FCOS-res5-p5-{}".format(args.extra_flag),
         "fp16" if config.TRAIN.USE_FP16 else "fp32",
         "sync_bn" if config.network.sync_bn else "normal_bn",
         "hvd" if config.use_hvd else "",
