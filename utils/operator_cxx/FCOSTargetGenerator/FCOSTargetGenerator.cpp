@@ -46,6 +46,7 @@ const T* bboxes, const int number_of_bboxes, T distance_min, T distance_max, T* 
                     if(max_delta >=distance_min && max_delta <= distance_max){
                         if (bbox_target < 0 || gt_area < gt_bbox_min_area){
                             bbox_target = n_b;
+                            gt_bbox_min_area = gt_area;
                         }
                     }
                 }
