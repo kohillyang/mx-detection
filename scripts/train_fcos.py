@@ -358,8 +358,6 @@ def train_net(config):
 
     while trainer.optimizer.num_update <= config.TRAIN.end_epoch * len(train_loader):
         epoch = trainer.optimizer.num_update // len(train_loader)
-        for ctx in ctx_list:
-            ctx.empty_cache()
         for data_batch in tqdm.tqdm(train_loader) if not config.use_hvd or hvd.local_rank() == 0 else train_loader:
             if config.use_hvd:
                 data_list = [data_batch[0].as_in_context(ctx_list[0])]
