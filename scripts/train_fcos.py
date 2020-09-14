@@ -477,7 +477,7 @@ def main():
     config.TRAIN = easydict.EasyDict()
     config.TRAIN.batch_size = args.im_per_gpu * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
-    config.TRAIN.warmup_lr = config.TRAIN.lr
+    config.TRAIN.warmup_lr = config.TRAIN.lr * 0.001
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
@@ -503,7 +503,7 @@ def main():
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
     config.network.use_global_stats = False
-    config.network.sync_bn = False
+    config.network.sync_bn = True
     config.network.fpn_neck_feature_dim = 256
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
