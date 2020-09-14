@@ -139,19 +139,19 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         self.fcos_head = FCOS_Head(num_classes)
         with self.name_scope():
             self.scale0 = self.params.get('scale0', shape=[1, 1, 1, 1],
-                                          init=mx.init.Constant(8),  # mx.nd.array(),
+                                          init=mx.init.Constant(1),  # mx.nd.array(),
                                           allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale1 = self.params.get('scale1', shape=[1, 1, 1, 1],
-                                          init=mx.init.Constant(16),  # mx.nd.array(),
+                                          init=mx.init.Constant(1),  # mx.nd.array(),
                                           allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale2 = self.params.get('scale2', shape=[1, 1, 1, 1],
-                                          init=mx.init.Constant(32),  # mx.nd.array(),
+                                          init=mx.init.Constant(1),  # mx.nd.array(),
                                           allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale3 = self.params.get('scale3', shape=[1, 1, 1, 1],
-                                          init=mx.init.Constant(64),  # mx.nd.array(),
+                                          init=mx.init.Constant(1),  # mx.nd.array(),
                                           allow_deferred_init=False, grad_req='write', wd_mult=0)
             self.scale4 = self.params.get('scale4', shape=[1, 1, 1, 1],
-                                          init=mx.init.Constant(128),  # mx.nd.array(),
+                                          init=mx.init.Constant(1),  # mx.nd.array(),
                                           allow_deferred_init=False, grad_req='write', wd_mult=0)
 
     def hybrid_forward(self, F, x, scale0, scale1, scale2, scale3, scale4):
@@ -376,14 +376,18 @@ def train_net(config):
             with ag.record():
                 for data, targets in zip(data_list, targets_list):
                     loc_preds, cls_preds = net(data)
-                    num_pos = targets[:, 0].sum() + 1
-                    # iou_loss = mobula.op.IoULoss(preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4)),
-                    #                              targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
-                    #                              ) * targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1)) / (targets[:, 5].sum() + 1)
-                    iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / (targets[:, 5].sum() + 1)
-                    loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos
-                    # loss_cls = BCEFocalLoss(preds[:, 5:], targets[:, 6:]) / num_pos
-                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos
+                    num_pos = targets[:, 0].sum()
+                    num_pos_denominator = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
+                    centerness_sum = targets[:, 5].sum()
+                    centerness_sum_denominator = mx.nd.maximum(centerness_sum, mx.nd.ones_like(centerness_sum))
+                    loc_preds_transposed_reshaped = loc_preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4))
+                    loc_targets_transposed_reshaped = targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
+                    loc_centerness_mask = targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1))
+                    iou_loss = mobula.op.IoULoss(loc_preds_transposed_reshaped, loc_targets_transposed_reshaped)
+                    iou_loss = iou_loss * loc_centerness_mask / centerness_sum_denominator
+                    # iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / loc_centerness_mask
+                    loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator
+                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
                     if config.TRAIN.USE_FP16:
                         with amp.scale_loss(loss_total, trainer) as scaled_losses:
