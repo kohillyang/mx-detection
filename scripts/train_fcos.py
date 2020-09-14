@@ -548,6 +548,7 @@ def inference_one_image(config, net, ctx, image_path):
         idx_start += current_layer_size
         loc_pred = loc_pred.reshape((0, 0, current_layer_h, current_layer_w))
         cls_pred = cls_pred.reshape((0, 0, current_layer_h, current_layer_w))
+        loc_pred[:, :4] = loc_pred[:, :4].exp()
         loc_pred[:, 4] = loc_pred[:, 4].sigmoid()
         cls_pred = cls_pred.sigmoid()
         rois = mobula.op.FCOSRegression(loc_pred, cls_pred, stride=stride)[0]
