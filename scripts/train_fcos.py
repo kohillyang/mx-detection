@@ -475,7 +475,7 @@ def main():
     config.TRAIN = easydict.EasyDict()
     config.TRAIN.batch_size = args.im_per_gpu * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
-    config.TRAIN.warmup_lr = config.TRAIN.lr * 0.001
+    config.TRAIN.warmup_lr = config.TRAIN.lr * 0.1
     config.TRAIN.warmup_step = 1000
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
