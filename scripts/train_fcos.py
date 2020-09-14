@@ -580,6 +580,7 @@ def demo_net(config):
                          sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
                          use_global_stats=config.network.use_global_stats)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
+    net.hybridize(static_alloc=True)
     net.collect_params().load(config.val.params_file)
     net.collect_params().reset_ctx(ctx_list[0])
     results = {}
