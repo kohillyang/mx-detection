@@ -503,7 +503,7 @@ def main():
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
     config.network.use_global_stats = False
-    config.network.sync_bn = True
+    config.network.sync_bn = False
     config.network.fpn_neck_feature_dim = 256
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
@@ -532,17 +532,26 @@ def inference_one_image(config, net, ctx, image_path):
     image = cv2.imread(image_path)[:, :, ::-1]
     fscale = min(config.TRAIN.image_short_size / min(image.shape[:2]), config.TRAIN.image_max_long_size / max(image.shape[:2]))
     image_padded = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
-    predictions = net(mx.nd.array(image_padded[np.newaxis], ctx=ctx))
+    data = mx.nd.array(image_padded[np.newaxis], ctx=ctx)
+    loc_preds, cls_preds = net(data)
     bboxes_pred_list = []
-    for stride, pred in zip(config.FCOS.network.FPN_SCALES, predictions):
-        pred[:, :4] = (pred[:, :4]).exp()
-        pred[:, 4] = pred[:, 4].sigmoid()
-        pred[:, 5:] = pred[:, 5:].sigmoid()
-
-        pred_np = pred.asnumpy()
-        rois = mobula.op.FCOSRegression[np.ndarray](stride)(prediction=pred_np)[0]
-        rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
-        bboxes_pred_list.append(rois)
+    idx_start = 0
+    for stride in config.FCOS.network.FPN_SCALES:
+        current_layer_h = int(np.ceil(data.shape[1] / stride))
+        current_layer_w = int(np.ceil(data.shape[2] / stride))
+        current_layer_size = current_layer_h * current_layer_w
+        loc_pred = loc_preds[:, :, idx_start:(idx_start+current_layer_size)]
+        cls_pred = cls_preds[:, :, idx_start:(idx_start+current_layer_size)]
+        idx_start += current_layer_size
+        loc_pred = loc_pred.reshape((0, 0, current_layer_h, current_layer_w))
+        cls_pred = cls_pred.reshape((0, 0, current_layer_h, current_layer_w))
+        loc_pred[:, 4] = loc_pred[:, 4].sigmoid()
+        cls_pred = cls_pred.sigmoid()
+        rois = mobula.op.FCOSRegression(loc_pred, cls_pred, stride=stride)[0]
+        rois = rois.reshape((-1, rois.shape[-1]))
+        topk_indices = mx.nd.topk(rois[:, 4], k=200, ret_typ="indices")
+        rois = rois[topk_indices]
+        bboxes_pred_list.append(rois.asnumpy())
     bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
     if len(bboxes_pred > 0):
         cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),

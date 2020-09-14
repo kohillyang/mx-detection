@@ -10,23 +10,21 @@ class FCOSRegression:
     def __init__(self, stride):
         self.stride = stride
 
-    def forward(self, prediction):
+    def forward(self, loc_pred, cls_pred):
         if self.req[0] == req.null:
             return
-        out = self.y
-        nbatch, feature_ch, feature_h, feature_w = prediction.shape
-        assert nbatch==1
+        nbatch, number_of_classes_no_background, feature_h, feature_w = cls_pred.shape
         if self.req[0] == req.add:
-            out_temp = self.F.zeros_like(out)
-            mobula.func.fcos_target_regression(prediction=prediction, feature_n=nbatch,
-                                               feature_h=feature_h, feature_w=feature_w, feature_ch=feature_ch,
-                                               stride=self.stride,
-                                               output=out_temp)
-            self.y[:] += out_temp
+            assert False
         else:
             self.y[:] = 0
-            mobula.func.fcos_target_regression(prediction=prediction, feature_n=nbatch,
-                                               feature_h=feature_h, feature_w=feature_w, feature_ch=feature_ch,
+            mobula.func.fcos_target_regression(outsize=self.y.size,
+                                               pointer_loc_pred=loc_pred,
+                                               pointer_cls_pred=cls_pred,
+                                               nbatch=nbatch,
+                                               number_of_classes_no_background=number_of_classes_no_background,
+                                               feature_h=feature_h,
+                                               feature_w=feature_w,
                                                stride=self.stride,
                                                output=self.y)
 
@@ -34,11 +32,5 @@ class FCOSRegression:
         pass    # nothing need to do
 
     def infer_shape(self, in_shape):
-        assert len(in_shape[0]) == 4  # nbatch, 6 + number_of_classes, feature_h, feature_w
-        nbatch, c, h, w = in_shape[0]
-        stride = self.stride
-        # 4 channel for bbox
-        # one channel for centerness
-        # No. of classes channels for class id,
-        # 6 + 81 channels in total, if coco dataset is used.
-        return in_shape, [(nbatch, h * w * (c-5), 6)]
+        nbatch, number_of_classes_no_background, feature_h, feature_w = in_shape[1]
+        return in_shape, [(nbatch, number_of_classes_no_background, feature_h, feature_w, 6)]
