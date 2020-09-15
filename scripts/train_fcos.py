@@ -250,13 +250,21 @@ def train_net(config):
     params = net.collect_params()
     for key in params.keys():
         if params[key]._data is None:
-            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Normal()
+            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Xavier()
             default_init.set_verbosity(True)
             if params[key].init is not None and hasattr(params[key].init, "set_verbosity"):
                 params[key].init.set_verbosity(True)
                 params[key].initialize(init=params[key].init, default_init=params[key].init)
             else:
                 params[key].initialize(default_init=default_init)
+    params = net.collect_params()
+    for p_name, p in params.items():
+        if p_name.endswith(('_bias')):
+            p.wd_mult = 0
+            p.lr_mult = 2
+            logging.info("set wd_mult of {} to {}.".format(p_name, p.wd_mult))
+            logging.info("set lr_mult of {} to {}.".format(p_name, p.lr_mult))
+
     if config.TRAIN.resume is not None:
         net.collect_params().load(config.TRAIN.resume)
         logging.info("loaded resume from {}".format(config.TRAIN.resume))
@@ -266,7 +274,7 @@ def train_net(config):
     if config.dataset.dataset_type == "coco":
         from data.bbox.mscoco import COCODetection
         base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                           h_flip=config.TRAIN.FLIP, transform=None)
+                                           h_flip=config.TRAIN.FLIP, transform=None, use_crowd=False)
     elif config.dataset.dataset_type == "voc":
         from data.bbox.voc import VOCDetection
         base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
