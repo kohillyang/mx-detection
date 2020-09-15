@@ -81,7 +81,7 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
         self.fpn_p6_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p6_3x3_", strides=2, padding=1)
         self.fpn_p5_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p5_3x3_", strides=1, padding=1)
         self.fpn_p4_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p4_3x3_", strides=1, padding=1)
-        self.fpn_p3_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p4_3x3_", strides=1, padding=1)
+        self.fpn_p3_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p3_3x3_", strides=1, padding=1)
 
         self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
         self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
@@ -99,7 +99,7 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
 
         P3 = self.fpn_p3_3x3(fpn_p3_plus)
         P4 = self.fpn_p4_3x3(fpn_p4_plus)
-        P5 = self.fpn_p4_3x3(fpn_p5_1x1)
+        P5 = self.fpn_p5_3x3(fpn_p5_1x1)
         P6 = self.fpn_p6_3x3(fpn_p5_1x1)
         P7 = self.fpn_p7_3x3(F.relu(P6))
 
