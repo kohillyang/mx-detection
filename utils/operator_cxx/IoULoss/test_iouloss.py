@@ -1,7 +1,7 @@
-import sys
-sys.path.append("/media/kk/data/kk/fcos/mx-detection/MobulaOP")
+import os
+os.environ["MXNET_ENGINE_TYPE"]="NaiveEngine"
 import mobula
-mobula.config.NVCC = "/usr/local/cuda-10.0/bin/nvcc"
+mobula.config.NVCC = "/usr/local/cuda-10.1/bin/nvcc"
 mobula.op.load('IoULoss', "/data2/kohill/mx-detection/utils/operator_cxx/")
 import mxnet as mx
 import numpy as np
@@ -66,17 +66,24 @@ def test_IoULoss_mx(ctx):
     x1 = x.copy()
     y1 = y.copy()
 
+    x2 = x.copy()
+    y2 = y.copy()
+
     x.attach_grad()
     x1.attach_grad()
+    x2.attach_grad()
 
     with ag.record():
         fl = IoULoss()(x, y)
-        fl_mobula = mobula.op.IoULoss(x1, y1).squeeze()
+        fl_mobula = mobula.op.IoULoss(x1, y1, axis=1).squeeze()
+        f2_mobula = mobula.op.IoULoss(x2.transpose(), y2.transpose(), axis=0).squeeze()
         fl.backward()
         fl_mobula.backward()
+        f2_mobula.backward()
     mx.nd.waitall()
-    assert_almost_equal(x.grad.asnumpy(), x1.grad.asnumpy())
     assert_almost_equal(fl.asnumpy(), fl_mobula.asnumpy())
+    assert_almost_equal(x.grad.asnumpy(), x1.grad.asnumpy())
+    assert_almost_equal(x.grad.asnumpy(), x2.grad.asnumpy())
 
     x = mx.nd.random.uniform(3, 5, shape=(N, 4), dtype="float64", ctx=ctx)
     y = mx.nd.random.uniform(np.exp(1), np.exp(2), shape=(N, 4), dtype="float64", ctx=ctx)

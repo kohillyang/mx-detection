@@ -20,17 +20,21 @@ namespace mobula {
 
 
 template <typename T>
-MOBULA_KERNEL iou_loss_forward_kernel(const int out_size, const T* preds, const T* targets, T* outputs) {
-  parfor(out_size, [&](int index) {
+MOBULA_KERNEL iou_loss_forward_kernel(const int size_before_axis, const int size_after_axis,
+		const T* preds, const T* targets, T* outputs) {
+  parfor(size_before_axis*size_after_axis, [&](int index) {
+    int idx_before_axis = index / size_after_axis;
+    index -= idx_before_axis * size_after_axis;
+    int idx_after_axis = index;
     const int l=0,t=1,r=2,b=3;
-    T targets_l = targets[index*4 + l];
-    T targets_t = targets[index*4 + t];
-    T targets_r = targets[index*4 + r];
-    T targets_b = targets[index*4 + b];
-    T preds_l = preds[index*4 + l];
-    T preds_t = preds[index*4 + t];
-    T preds_r = preds[index*4 + r];
-    T preds_b = preds[index*4 + b];
+    T targets_l = targets[idx_before_axis*(4*size_after_axis) + l*(size_after_axis) + idx_after_axis];
+    T targets_t = targets[idx_before_axis*(4*size_after_axis) + t*(size_after_axis) + idx_after_axis];
+    T targets_r = targets[idx_before_axis*(4*size_after_axis) + r*(size_after_axis) + idx_after_axis];
+    T targets_b = targets[idx_before_axis*(4*size_after_axis) + b*(size_after_axis) + idx_after_axis];
+    T preds_l = preds[idx_before_axis*(4*size_after_axis) + l*(size_after_axis) + idx_after_axis];
+    T preds_t = preds[idx_before_axis*(4*size_after_axis) + t*(size_after_axis) + idx_after_axis];
+    T preds_r = preds[idx_before_axis*(4*size_after_axis) + r*(size_after_axis) + idx_after_axis];
+    T preds_b = preds[idx_before_axis*(4*size_after_axis) + b*(size_after_axis) + idx_after_axis];
     if(targets_l > 0 && targets_t >0 && targets_r >0 && targets_b >0){
         targets_l = log(targets_l);
         targets_t = log(targets_t);
@@ -69,24 +73,28 @@ MOBULA_KERNEL iou_loss_forward_kernel(const int out_size, const T* preds, const 
         T X_hat = exp(tl_hat- max_v) + exp(tr_hat- max_v) + exp(bl_hat- max_v) + exp(br_hat- max_v);
         T I_over_U = I / (X + X_hat - I);
         T loss = log(I_over_U) * -1;
-        outputs[index] = loss;
+        outputs[idx_before_axis *size_after_axis + idx_after_axis] = loss;
     }
-  });
+    });
 }  // focal_loss_forward_kernel
 
 
 template <typename T>
-MOBULA_KERNEL iou_loss_backward_kernel(const int out_size, const T* preds, const T* targets, T* outputs) {
-  parfor(out_size, [&](int index) {
+MOBULA_KERNEL iou_loss_backward_kernel(const int size_before_axis, const int size_after_axis,
+        const T* preds, const T* targets, T* outputs) {
+  parfor(size_before_axis*size_after_axis, [&](int index) {
+    int idx_before_axis = index / size_after_axis;
+    index -= idx_before_axis * size_after_axis;
+    int idx_after_axis = index;
     const int l=0,t=1,r=2,b=3;
-    T targets_l = targets[index*4 + l];
-    T targets_t = targets[index*4 + t];
-    T targets_r = targets[index*4 + r];
-    T targets_b = targets[index*4 + b];
-    T preds_l = preds[index*4 + l];
-    T preds_t = preds[index*4 + t];
-    T preds_r = preds[index*4 + r];
-    T preds_b = preds[index*4 + b];
+    T targets_l = targets[idx_before_axis*(4*size_after_axis) + l*(size_after_axis) + idx_after_axis];
+    T targets_t = targets[idx_before_axis*(4*size_after_axis) + t*(size_after_axis) + idx_after_axis];
+    T targets_r = targets[idx_before_axis*(4*size_after_axis) + r*(size_after_axis) + idx_after_axis];
+    T targets_b = targets[idx_before_axis*(4*size_after_axis) + b*(size_after_axis) + idx_after_axis];
+    T preds_l = preds[idx_before_axis*(4*size_after_axis) + l*(size_after_axis) + idx_after_axis];
+    T preds_t = preds[idx_before_axis*(4*size_after_axis) + t*(size_after_axis) + idx_after_axis];
+    T preds_r = preds[idx_before_axis*(4*size_after_axis) + r*(size_after_axis) + idx_after_axis];
+    T preds_b = preds[idx_before_axis*(4*size_after_axis) + b*(size_after_axis) + idx_after_axis];
     if(targets_l > 0 && targets_t >0 && targets_r >0 && targets_b >0){
         targets_l = log(targets_l);
         targets_t = log(targets_t);
@@ -174,10 +182,10 @@ MOBULA_KERNEL iou_loss_backward_kernel(const int out_size, const T* preds, const
             partial_item_2 /= (X + X_hat - I);
             partial_b = partial_item_1 - partial_item_2;
         }
-        outputs[index *4 + l] = -1 * partial_l;
-        outputs[index *4 + t] = -1 * partial_t;
-        outputs[index *4 + r] = -1 * partial_r;
-        outputs[index *4 + b] = -1 * partial_b;
+        outputs[idx_before_axis*(4*size_after_axis) + l*(size_after_axis) + idx_after_axis] = -1 * partial_l;
+        outputs[idx_before_axis*(4*size_after_axis) + t*(size_after_axis) + idx_after_axis] = -1 * partial_t;
+        outputs[idx_before_axis*(4*size_after_axis) + r*(size_after_axis) + idx_after_axis] = -1 * partial_r;
+        outputs[idx_before_axis*(4*size_after_axis) + b*(size_after_axis) + idx_after_axis] = -1 * partial_b;
     }
   });
 }  // iou_loss_backward_kernel
