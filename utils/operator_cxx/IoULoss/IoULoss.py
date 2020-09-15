@@ -43,6 +43,6 @@ class IoULoss:
         self.dX[0][:] *= dy
 
     def infer_shape(self, in_shape):
-        size_before_axis = int(np.prod(in_shape[0][:self.axis]))
-        size_after_axis = int(np.prod(in_shape[0][(self.axis + 1):]))
-        return in_shape, [(size_before_axis, size_after_axis)]
+        pred_shape = np.copy(in_shape[0])
+        pred_shape[self.axis] = 1
+        return in_shape, [pred_shape]

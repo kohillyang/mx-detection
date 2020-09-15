@@ -66,6 +66,8 @@ def load_mobula_ops():
     mobula.op.load('BCELoss', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
     mobula.op.load('FCOSTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
     mobula.op.load('FCOSRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load("FocalLoss")
+    mobula.op.load("IoULoss", os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
 
 def batch_fn(x):
@@ -344,8 +346,6 @@ def train_net(config):
     eval_metrics = mx.metric.CompositeEvalMetric()
     for child_metric in [metric_loss_loc, metric_loss_cls, metric_loss_center]:
         eval_metrics.add(child_metric)
-    mobula.op.load("FocalLoss")
-    mobula.op.load("IoULoss", os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
 
     net.hybridize(static_alloc=True, static_shape=False)
     for ctx in ctx_list:
@@ -380,11 +380,8 @@ def train_net(config):
                     num_pos_denominator = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
                     centerness_sum = targets[:, 5].sum()
                     centerness_sum_denominator = mx.nd.maximum(centerness_sum, mx.nd.ones_like(centerness_sum))
-                    loc_preds_transposed_reshaped = loc_preds[:, :4].transpose((0, 2, 1)).reshape((-1, 4))
-                    loc_targets_transposed_reshaped = targets[:, 1:5].transpose((0, 2, 1)).reshape((-1, 4))
-                    loc_centerness_mask = targets[:, 5:6].transpose((0, 2, 1)).reshape((-1, 1))
-                    iou_loss = mobula.op.IoULoss(loc_preds_transposed_reshaped, loc_targets_transposed_reshaped)
-                    iou_loss = iou_loss * loc_centerness_mask / centerness_sum_denominator
+                    iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
+                    iou_loss = iou_loss * targets[:, 5] / centerness_sum_denominator
                     # iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / loc_centerness_mask
                     loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator
