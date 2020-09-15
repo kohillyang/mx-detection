@@ -77,8 +77,12 @@ def batch_fn(x):
 class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
     def __init__(self, feature_dim=256):
         super(PyramidNeckFCOS, self).__init__()
-        self.fpn_p7_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p7_1x1_", strides=2, padding=1)
-        self.fpn_p6_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p6_1x1_", strides=2, padding=1)
+        self.fpn_p7_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p7_3x3_", strides=2, padding=1)
+        self.fpn_p6_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p6_3x3_", strides=2, padding=1)
+        self.fpn_p5_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p5_3x3_", strides=1, padding=1)
+        self.fpn_p4_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p4_3x3_", strides=1, padding=1)
+        self.fpn_p3_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p4_3x3_", strides=1, padding=1)
+
         self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
         self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
         self.fpn_p3_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p3_1x1_")
@@ -93,10 +97,13 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
         fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, mode="like", like=fpn_p3_1x1)
         fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
 
-        p6 = self.fpn_p6_3x3(res5)
-        p7 = self.fpn_p7_3x3(F.relu(p6))
+        P3 = self.fpn_p3_3x3(fpn_p3_plus)
+        P4 = self.fpn_p4_3x3(fpn_p4_plus)
+        P5 = self.fpn_p4_3x3(fpn_p5_1x1)
+        P6 = self.fpn_p6_3x3(fpn_p5_1x1)
+        P7 = self.fpn_p7_3x3(F.relu(P6))
 
-        return fpn_p3_plus, fpn_p4_plus, fpn_p5_1x1, p6, p7
+        return P3, P4, P5, P6, P7
 
 
 class FCOS_Head(mx.gluon.nn.HybridBlock):
