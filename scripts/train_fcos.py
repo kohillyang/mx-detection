@@ -381,7 +381,7 @@ def train_net(config):
                     centerness_sum = targets[:, 5].sum()
                     centerness_sum_denominator = mx.nd.maximum(centerness_sum, mx.nd.ones_like(centerness_sum))
                     iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
-                    iou_loss = iou_loss * targets[:, 5] / centerness_sum_denominator
+                    iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator
                     # iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / loc_centerness_mask
                     loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator
