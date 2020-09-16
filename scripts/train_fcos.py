@@ -567,14 +567,13 @@ def inference_one_image(config, net, ctx, image_path):
         rois = rois.reshape((-1, rois.shape[-1]))
         topk_indices = mx.nd.topk(rois[:, 4], k=200, ret_typ="indices")
         rois = rois[topk_indices]
-        bboxes_pred_list.append(rois.asnumpy())
-    bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
+        bboxes_pred_list.append(rois)
+    bboxes_pred = mx.nd.concat(*bboxes_pred_list, dim=0)
     if len(bboxes_pred > 0):
-        cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
-                                         overlap_thresh=.6, coord_start=0, score_index=4, id_index=-1,
+        cls_dets = mx.nd.contrib.box_nms(bboxes_pred, overlap_thresh=.6, coord_start=0, score_index=4, id_index=-1,
                                          force_suppress=False, in_format='corner',
                                          out_format='corner').asnumpy()
-        cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
+        cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.001)]
         cls_dets[:, :4] /= fscale
         if config.val.viz:
             gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
