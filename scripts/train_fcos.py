@@ -388,18 +388,23 @@ def train_net(config):
             losses_loc = []
             losses_center_ness = []
             losses_cls=[]
+
+            n_workers = hvd.local_size() if config.use_hvd else len(ctx_list)
+            num_pos = data_batch[0][1][:, 0].sum() / n_workers
+            num_pos_denominator = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
+            centerness_sum = data_batch[0][1][:, 5].sum() / n_workers
+            centerness_sum_denominator = mx.nd.maximum(centerness_sum, mx.nd.ones_like(centerness_sum))
+
             with ag.record():
                 for data, targets in zip(data_list, targets_list):
+                    num_pos_denominator_ctx = num_pos_denominator.as_in_context(data.context)
+                    centerness_sum_denominator_ctx = centerness_sum_denominator.as_in_context(data.context)
                     loc_preds, cls_preds = net(data)
-                    num_pos = targets[:, 0].sum()
-                    num_pos_denominator = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
-                    centerness_sum = targets[:, 5].sum()
-                    centerness_sum_denominator = mx.nd.maximum(centerness_sum, mx.nd.ones_like(centerness_sum))
                     iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
-                    iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator
-                    # iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / loc_centerness_mask
-                    loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator
-                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator
+                    iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator_ctx
+                    # iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
+                    loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator_ctx
+                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator_ctx
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
                     if config.TRAIN.USE_FP16:
                         with amp.scale_loss(loss_total, trainer) as scaled_losses:
@@ -410,10 +415,7 @@ def train_net(config):
                     losses_center_ness.append(loss_center)
                     losses_cls.append(loss_cls)
 
-            if config.use_hvd:
-                trainer.step(hvd.local_size())
-            else:
-                trainer.step(len(ctx_list))
+            trainer.step(n_workers)
             if not config.use_hvd or hvd.local_rank() == 0:
                 for l in losses_loc:
                     metric_loss_loc.update(None, l.sum())
@@ -492,8 +494,8 @@ def main():
     config.TRAIN = easydict.EasyDict()
     config.TRAIN.batch_size = args.im_per_gpu * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
-    config.TRAIN.warmup_lr = config.TRAIN.lr * 0.1
-    config.TRAIN.warmup_step = 1000
+    config.TRAIN.warmup_lr = config.TRAIN.lr * 1/3
+    config.TRAIN.warmup_step = 500
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_interval = 100

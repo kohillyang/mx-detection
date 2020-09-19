@@ -12,6 +12,8 @@ def log_init(filename):
     import logging
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
+    for h in logger.handlers:
+        logger.removeHandler(h)
     fh = logging.FileHandler(filename)
     fh.setLevel(logging.DEBUG)
 
