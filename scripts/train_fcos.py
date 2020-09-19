@@ -100,7 +100,7 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
         P3 = self.fpn_p3_3x3(fpn_p3_plus)
         P4 = self.fpn_p4_3x3(fpn_p4_plus)
         P5 = self.fpn_p5_3x3(fpn_p5_1x1)
-        P6 = self.fpn_p6_3x3(fpn_p5_1x1)
+        P6 = self.fpn_p6_3x3(P5)
         P7 = self.fpn_p7_3x3(F.relu(P6))
 
         return P3, P4, P5, P6, P7
