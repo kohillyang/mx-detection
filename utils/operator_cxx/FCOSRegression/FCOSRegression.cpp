@@ -18,6 +18,8 @@ MOBULA_KERNEL fcos_target_regression_kernel(
 		int feature_h,
 		int feature_w,
 		int stride,
+		int image_width,
+		int image_height,
 		T* output) {
 
     UNUSED(outsize);
@@ -43,6 +45,31 @@ MOBULA_KERNEL fcos_target_regression_kernel(
         T pred_y0 = ori_y - delta_t;
         T pred_x1 = ori_x + delta_r;
         T pred_y1 = ori_y + delta_b;
+        if(pred_x0 <0){
+            pred_x0 = 0;
+        }
+        if(pred_y0 <0){
+            pred_y0 = 0;
+        }
+        if(pred_x1 <0){
+            pred_x1 = 0;
+        }
+        if(pred_y1 <0){
+            pred_y1 = 0;
+        }
+
+        if(pred_x0 > image_width - 1){
+            pred_x0 = image_width - 1;
+        }
+        if(pred_y0 > image_height - 1){
+            pred_y0 = image_height - 1;
+        }
+        if(pred_x1 >image_width - 1){
+            pred_x1 = image_width - 1;
+        }
+        if(pred_y1 > image_height - 1){
+            pred_y1 = image_height - 1;
+        }
 
         for(int class_id=0; class_id<number_of_classes_no_background; class_id++){
             T class_score = tensor_cls_pred(batch_idx, class_id, h_idx, w_idx);
@@ -51,7 +78,11 @@ MOBULA_KERNEL fcos_target_regression_kernel(
             tensor_output(batch_idx, class_id, h_idx, w_idx, 1) = pred_y0;
             tensor_output(batch_idx, class_id, h_idx, w_idx, 2) = pred_x1;
             tensor_output(batch_idx, class_id, h_idx, w_idx, 3) = pred_y1;
-            tensor_output(batch_idx, class_id, h_idx, w_idx, 4) = score_used_for_ranking;
+            if(pred_y1 >= pred_y0 && pred_x1 >= pred_x0){
+                tensor_output(batch_idx, class_id, h_idx, w_idx, 4) = score_used_for_ranking;
+            }else{
+                tensor_output(batch_idx, class_id, h_idx, w_idx, 4) = 0;
+            }
             tensor_output(batch_idx, class_id, h_idx, w_idx, 5) = class_id;
         }
 	});

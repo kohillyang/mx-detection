@@ -549,6 +549,7 @@ def inference_one_image(config, net, ctx, image_path):
     image = cv2.imread(image_path)[:, :, ::-1]
     fscale = min(config.TRAIN.image_short_size / min(image.shape[:2]), config.TRAIN.image_max_long_size / max(image.shape[:2]))
     image_padded = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
+    input_image_height, input_image_width, _ = image_padded.shape
     data = mx.nd.array(image_padded[np.newaxis], ctx=ctx)
     loc_preds, cls_preds = net(data)
     bboxes_pred_list = []
@@ -565,7 +566,7 @@ def inference_one_image(config, net, ctx, image_path):
         loc_pred[:, :4] = loc_pred[:, :4].exp()
         loc_pred[:, 4] = loc_pred[:, 4].sigmoid()
         cls_pred = cls_pred.sigmoid()
-        rois = mobula.op.FCOSRegression(loc_pred, cls_pred, stride=stride)[0]
+        rois = mobula.op.FCOSRegression(loc_pred, cls_pred, stride=stride, image_width=input_image_width, image_height=input_image_height)[0]
         rois = rois.reshape((-1, rois.shape[-1]))
         topk_indices = mx.nd.topk(rois[:, 4], k=200, ret_typ="indices")
         rois = rois[topk_indices]

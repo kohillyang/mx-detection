@@ -7,8 +7,10 @@ import numpy as np
 
 @mobula.op.register
 class FCOSRegression:
-    def __init__(self, stride):
+    def __init__(self, stride, image_width, image_height):
         self.stride = stride
+        self.image_width = image_width
+        self.image_height = image_height
 
     def forward(self, loc_pred, cls_pred):
         if self.req[0] == req.null:
@@ -26,6 +28,8 @@ class FCOSRegression:
                                                feature_h=feature_h,
                                                feature_w=feature_w,
                                                stride=self.stride,
+                                               image_width=self.image_width,
+                                               image_height=self.image_height,
                                                output=self.y)
 
     def backward(self, rois):
