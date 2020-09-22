@@ -16,7 +16,8 @@ import tqdm
 
 from data.bbox.bbox_dataset import AspectGroupingDataset
 from utils.common import log_init
-from models.backbones.resnet import ResNetV1B
+from models.backbones.resnet import ResNetV1
+# from models.backbones.resnet import ResNetV1B
 # from models.backbones.dcn_resnet.resnet import ResNetV1B
 
 
@@ -226,7 +227,7 @@ def train_net(config):
 
     ctx_list = [mx.gpu(x) for x in config.gpus]
     neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = ResNetV1B(neck=neck,
+    backbone = ResNetV1(neck=neck,
                          sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
                          use_global_stats=config.network.use_global_stats)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
@@ -314,7 +315,8 @@ def train_net(config):
                     ignore = True
                     params_all[p].grad_req = 'null'
                     logging.info("{} is ignored when training.".format(p))
-        if not ignore: params_to_train[p] = params_all[p]
+        if not ignore and params_all[p].grad_req != "null":
+            params_to_train[p] = params_all[p]
     lr_steps = [len(train_loader) * int(x) for x in config.TRAIN.lr_step]
     logging.info(lr_steps)
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
