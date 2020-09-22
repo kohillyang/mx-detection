@@ -272,6 +272,47 @@ class AspectGroupingDataset(object):
             self.target_generator = target_generator
         self.batch_size = config.TRAIN.batch_size
 
+    def max_wh_product(self):
+        """
+        Get max data shape after grouping.
+        For example, if you are grouping two images with shapes (1024, 1, 3) and (1, 1024, 3), then
+        the max data shape should be (1024, 1024, 3) instead of (1, 1024, 3) or (1024, 1, 3).
+
+        This function is designed for static alloc strategy, which is useful
+        for avoiding memory fragmentation, larger batchsize and faster training speed.
+        Returns
+        -------
+
+        """
+        max_wh_product = 1
+        for idx in range(len(self)):
+            max_h = 0
+            max_w = 0
+            for i in range(len(self.batch_size)):
+                idx_mapped = self.aspects_argsort[idx * self.batch_size + i]
+                # ratio should be w / h
+                ratio = self.aspects[idx_mapped]
+                if ratio >= 1:  # w is longer than h
+                    short_size = self.max_size / ratio
+                    long_size = self.max_size
+                    if short_size > self.short_size:
+                        short_size = self.short_size
+                        long_size = ratio * short_size
+                    h_i = int(np.ceil(short_size))
+                    w_i = int(np.ceil(long_size))
+                else:   # w is smaller than h
+                    short_size = self.max_size * ratio
+                    long_size = self.max_size
+                    if short_size > self.short_size:
+                        short_size = self.short_size
+                        long_size = short_size / ratio
+                    h_i = int(np.ceil(long_size))
+                    w_i = int(np.ceil(short_size))
+                max_h = max(max_h, h_i)
+                max_w = max(max_w, w_i)
+                max_wh_product = max(max_h * max_w)
+        return max_wh_product
+
     def __len__(self):
         return len(self.base_dataset) // self.batch_size
 
