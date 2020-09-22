@@ -367,7 +367,8 @@ def train_net(config):
     net.hybridize(static_alloc=True, static_shape=False)
     for ctx in ctx_list:
         with ag.record():
-            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+            _ = net(mx.nd.random.randn(config.TRAIN.batch_size // len(ctx_list),
+                                       config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
         ag.backward(_)
         del _
         net.collect_params().zero_grad()
