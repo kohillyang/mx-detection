@@ -92,10 +92,9 @@ class PyramidNeckFCOS(mx.gluon.nn.HybridBlock):
         fpn_p5_1x1 = self.fpn_p5_1x1(res5)
         fpn_p4_1x1 = self.fpn_p4_1x1(res4)
         fpn_p3_1x1 = self.fpn_p3_1x1(res3)
-
-        fpn_p5_upsample = F.contrib.BilinearResize2D(fpn_p5_1x1, mode="like", like=fpn_p4_1x1)
+        fpn_p5_upsample = F.contrib.BilinearResize2D(fpn_p5_1x1, scale_width=2, scale_height=2)
         fpn_p4_plus = F.ElementWiseSum(*[fpn_p5_upsample, fpn_p4_1x1])
-        fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, mode="like", like=fpn_p3_1x1)
+        fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, scale_width=2, scale_height=2)
         fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
 
         P3 = self.fpn_p3_3x3(fpn_p3_plus)
@@ -367,8 +366,11 @@ def train_net(config):
     net.hybridize(static_alloc=True, static_shape=False)
     for ctx in ctx_list:
         with ag.record():
+            pad = lambda x: int(np.ceil(x/32) * 32)
             _ = net(mx.nd.random.randn(config.TRAIN.batch_size // len(ctx_list),
-                                       config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
+                                       int(pad(config.TRAIN.image_max_long_size + 32)),
+                                       int(pad(config.TRAIN.image_short_size + 32)), 3,
+                                       ctx=ctx))
         ag.backward(_)
         del _
         net.collect_params().zero_grad()

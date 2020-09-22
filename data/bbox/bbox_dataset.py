@@ -326,8 +326,7 @@ class AspectGroupingDataset(object):
             bbox = bbox[:, :5]
             images_list.append(image)
             bboxes_list.append(bbox)
-        # pad = lambda x: x if x % 128 == 0 else x + 128 - x % 128
-        pad = lambda x:x
+        pad = lambda x: int(np.ceil(x / 32) * 32)
         max_h = pad(max([x.shape[0] for x in images_list]))
         max_w = pad(max([x.shape[1] for x in images_list]))
         for i in range(len(images_list)):
