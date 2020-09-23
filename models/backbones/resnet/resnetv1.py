@@ -3,22 +3,11 @@ from ._resnetv1 import resnet50_v1
 
 
 class ResNetV1(mx.gluon.nn.HybridBlock):
-    def __init__(self, neck, num_layers=50, sync_bn=False, num_devices=None,
-                 pretrained=True, use_global_stats=True):
+    def __init__(self, neck, num_layers=50, **kwargs):
         super(ResNetV1, self).__init__(prefix="resnetv1")
-        feat_kwargs = {}
-        if sync_bn is True:
-            assert num_devices is not None, "num_devices is not given while sync_bn is set."
-            assert isinstance(num_devices, int)
-            feat_kwargs["norm_layer"] = mx.gluon.contrib.nn.SyncBatchNorm
-            feat_kwargs["norm_kwargs"] = {"num_devices": num_devices}
-        if use_global_stats:
-            if "norm_kwargs" in feat_kwargs:
-                feat_kwargs["norm_kwargs"]["norm_kwargs"] = True
-
         assert num_layers in (50, 101, 152)
         if num_layers == 50:
-            feat = resnet50_v1(pretrained=pretrained,  **feat_kwargs)
+            feat = resnet50_v1(**kwargs)
         else:
             assert False
         self.feat = feat

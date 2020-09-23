@@ -62,6 +62,52 @@ class IoULoss(mx.gluon.nn.Block):
         return -(I_over_U).log()
 
 
+class IoULossExp(mx.gluon.nn.Block):
+    def __init__(self):
+        super(IoULossExp, self).__init__()
+
+    def max(self, *args):
+        if len(args) == 1:
+            return args[0]
+        else:
+            maximum = args[0]
+            for arg in args[1:]:
+                maximum = mx.nd.maximum(maximum, arg)
+            return maximum
+
+    def forward(self, prediction, target):
+        assert prediction.shape[1] == 4
+        assert target.shape[1] == 4
+        # target = mx.nd.maximum(target, mx.nd.ones_like(target))
+        target = mx.nd.log(target)
+
+        l, t, r, b = 0, 1, 2, 3 # l, t, r, b
+        tl = target[:, t] + target[:, l]
+        tr = target[:, t] + target[:, r]
+        bl = target[:, b] + target[:, l]
+        br = target[:, b] + target[:, r]
+        tl_hat = prediction[:, t] + prediction[:, l]
+        tr_hat = prediction[:, t] + prediction[:, r]
+        bl_hat = prediction[:, b] + prediction[:, l]
+        br_hat = prediction[:, b] + prediction[:, r]
+
+        x_t_i = mx.nd.minimum(target[:, t], prediction[:, t])
+        x_b_i = mx.nd.minimum(target[:, b], prediction[:, b])
+        x_l_i = mx.nd.minimum(target[:, l], prediction[:, l])
+        x_r_i = mx.nd.minimum(target[:, r], prediction[:, r])
+
+        tl_i = x_t_i + x_l_i
+        tr_i = x_t_i + x_r_i
+        bl_i = x_b_i + x_l_i
+        br_i = x_b_i + x_r_i
+
+        max_v = self.max(tl, tr, bl, br, tl_hat, tr_hat, bl_hat, br_hat, tl_i, tr_i, bl_i, br_i)
+        I = mx.nd.exp(tl_i - max_v) + mx.nd.exp(tr_i- max_v) + mx.nd.exp(bl_i- max_v) + mx.nd.exp(br_i- max_v)
+        X = mx.nd.exp(tl- max_v) + mx.nd.exp(tr- max_v) + mx.nd.exp(bl- max_v) + mx.nd.exp(br- max_v)
+        X_hat = mx.nd.exp(tl_hat- max_v) + mx.nd.exp(tr_hat- max_v) + mx.nd.exp(bl_hat- max_v) + mx.nd.exp(br_hat- max_v)
+        I_over_U = (I + 1) / (X + X_hat - I + 1)
+        return -(I_over_U).log()
+
 def load_mobula_ops():
     logging.info(mobula.__path__)
     mobula.op.load('BCELoss', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
@@ -119,7 +165,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
                 self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
-            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=1, padding=0,
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1,
                                                  bias_initializer=init_bias, weight_initializer=init))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
@@ -129,8 +175,8 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             # one extra channel for center-ness, four channel for location regression.
-            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4, kernel_size=1, padding=0, weight_initializer=init)
-            self.feat_reg_centerness = mx.gluon.nn.Conv2D(channels=1, kernel_size=1, padding=0, weight_initializer=init)
+            self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4, kernel_size=3, padding=1, weight_initializer=init)
+            self.feat_reg_centerness = mx.gluon.nn.Conv2D(channels=1, kernel_size=3, padding=1, weight_initializer=init)
 
     def hybrid_forward(self, F, x, scale):
         feat_reg = self.feat_reg(x)
@@ -225,10 +271,9 @@ def train_net(config):
         import horovod.mxnet as hvd
 
     ctx_list = [mx.gpu(x) for x in config.gpus]
+    from utils.blocks import FrozenBatchNorm2d
     neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = ResNetV1(neck=neck,
-                         sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
-                         use_global_stats=config.network.use_global_stats)
+    backbone = ResNetV1(neck=neck, norm_layer=FrozenBatchNorm2d, norm_kwargs={}, pretrained=True)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -248,9 +293,10 @@ def train_net(config):
 
     # Initialize parameters
     params = net.collect_params()
+    from utils.initializer import KaMingUniform
     for key in params.keys():
         if params[key]._data is None:
-            default_init = mx.init.Zero() if "bias" in key or "offset" in key else mx.init.Xavier()
+            default_init = mx.init.Zero() if "bias" in key or "offset" in key else KaMingUniform()
             default_init.set_verbosity(True)
             if params[key].init is not None and hasattr(params[key].init, "set_verbosity"):
                 params[key].init.set_verbosity(True)
@@ -258,12 +304,12 @@ def train_net(config):
             else:
                 params[key].initialize(default_init=default_init)
     params = net.collect_params()
-    for p_name, p in params.items():
-        if p_name.endswith(('_bias')):
-            p.wd_mult = 0
-            p.lr_mult = 2
-            logging.info("set wd_mult of {} to {}.".format(p_name, p.wd_mult))
-            logging.info("set lr_mult of {} to {}.".format(p_name, p.lr_mult))
+    # for p_name, p in params.items():
+    #     if p_name.endswith(('_bias')):
+    #         p.wd_mult = 0
+    #         p.lr_mult = 2
+    #         logging.info("set wd_mult of {} to {}.".format(p_name, p.wd_mult))
+    #         logging.info("set lr_mult of {} to {}.".format(p_name, p.lr_mult))
 
     if config.TRAIN.resume is not None:
         net.collect_params().load(config.TRAIN.resume)
@@ -308,6 +354,9 @@ def train_net(config):
     params_fixed_prefix = config.network.FIXED_PARAMS
     for p in params_all.keys():
         ignore = False
+        if params_all[p].grad_req == "null" and "running" not in p:
+            ignore = True
+            logging.info("ignore {} because its grad req is set to null.".format(p))
         if params_fixed_prefix is not None:
             for f in params_fixed_prefix:
                 if f in str(p) and "group" not in str(p):
@@ -405,9 +454,9 @@ def train_net(config):
                     num_pos_denominator_ctx = num_pos_denominator.as_in_context(data.context)
                     centerness_sum_denominator_ctx = centerness_sum_denominator.as_in_context(data.context)
                     loc_preds, cls_preds = net(data)
-                    iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
-                    iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator_ctx
-                    # iou_loss = IoULoss()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
+                    # iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
+                    # iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator_ctx
+                    iou_loss = IoULossExp()(loc_preds[:, :4], targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
                     loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator_ctx
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator_ctx
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
@@ -500,7 +549,7 @@ def main():
     config.TRAIN.batch_size = args.im_per_gpu * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
     config.TRAIN.warmup_lr = config.TRAIN.lr * 1/3
-    config.TRAIN.warmup_step = 500
+    config.TRAIN.warmup_step = int(1000 * 16 / config.TRAIN.batch_size)
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_interval = 100
@@ -524,8 +573,8 @@ def main():
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.FIXED_PARAMS = []
-    config.network.use_global_stats = False
-    config.network.sync_bn = True
+    config.network.use_global_stats = True
+    config.network.sync_bn = False
     config.network.fpn_neck_feature_dim = 256
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
