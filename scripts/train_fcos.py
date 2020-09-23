@@ -163,7 +163,6 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             init_bias.set_verbosity(True)
             for i in range(4):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
-                self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
             self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1,
                                                  bias_initializer=init_bias, weight_initializer=init))
@@ -171,7 +170,6 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
                 self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
-                self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             # one extra channel for center-ness, four channel for location regression.
