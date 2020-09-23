@@ -163,6 +163,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             init_bias.set_verbosity(True)
             for i in range(4):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
+                self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
             self.feat_cls_logits = mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1,
                                                       bias_initializer=init_bias, weight_initializer=init)
@@ -170,6 +171,7 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
                 self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
+                self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             # one extra channel for center-ness, four channel for location regression.
@@ -457,7 +459,7 @@ def train_net(config):
                     loc_preds, cls_preds = net(data)
                     # iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
                     # iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator_ctx
-                    iou_loss = IoULoss(loc_preds[:, :4].exp(), targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
+                    iou_loss = IoULoss()(loc_preds[:, :4].exp(), targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
                     loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator_ctx
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator_ctx
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
@@ -573,8 +575,8 @@ def main():
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
-    config.network.FIXED_PARAMS = [".*layer1.*",
-                                   ".*resnetv1b_conv0.*"]
+    config.network.FIXED_PARAMS = [".*stage1.*",
+                                   ".*resnetv10_conv0.*"]
     config.network.use_global_stats = True
     config.network.sync_bn = False
     config.network.fpn_neck_feature_dim = 256
