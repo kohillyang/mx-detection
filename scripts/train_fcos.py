@@ -356,11 +356,12 @@ def train_net(config):
             ignore = True
             logging.info("ignore {} because its grad req is set to null.".format(p))
         if params_fixed_prefix is not None:
+            import re
             for f in params_fixed_prefix:
-                if f in str(p) and "group" not in str(p):
+                if re.match(f, str(p)) is not None:
                     ignore = True
                     params_all[p].grad_req = 'null'
-                    logging.info("{} is ignored when training.".format(p))
+                    logging.info("{} is ignored when training because it matches {}.".format(p, f))
         if not ignore and params_all[p].grad_req != "null":
             params_to_train[p] = params_all[p]
     lr_steps = [len(train_loader) * int(x) for x in config.TRAIN.lr_step]
@@ -570,7 +571,8 @@ def main():
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
-    config.network.FIXED_PARAMS = []
+    config.network.FIXED_PARAMS = [".*layer1.*",
+                                   ".*resnetv1b_conv0.*"]
     config.network.use_global_stats = True
     config.network.sync_bn = False
     config.network.fpn_neck_feature_dim = 256
