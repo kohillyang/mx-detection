@@ -606,7 +606,10 @@ def main():
 def inference_one_image(config, net, ctx, image_path):
     image = cv2.imread(image_path)[:, :, ::-1]
     fscale = min(config.TRAIN.image_short_size / min(image.shape[:2]), config.TRAIN.image_max_long_size / max(image.shape[:2]))
-    image_padded = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
+    image_resized = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
+    pad = lambda x: int(np.ceil(x/32) * 32)
+    image_padded = np.zeros(shape=(pad(image_resized.shape[0]), pad(image_resized.shape[1]), 3))
+    image_padded[:image_resized.shape[0], :image_resized.shape[1]] = image_resized
     input_image_height, input_image_width, _ = image_padded.shape
     data = mx.nd.array(image_padded[np.newaxis], ctx=ctx)
     loc_preds, cls_preds = net(data)
@@ -649,12 +652,11 @@ def inference_one_image(config, net, ctx, image_path):
 def demo_net(config):
     import json
     from utils.evaluate import evaluate_coco
+    from utils.blocks import FrozenBatchNorm2d
     import tqdm
     ctx_list = [mx.gpu(x) for x in config.gpus]
     neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = ResNetV1B(neck=neck,
-                         sync_bn=config.network.sync_bn, num_devices=len(config.gpus),
-                         use_global_stats=config.network.use_global_stats)
+    backbone = ResNetV1(neck=neck, norm_layer=FrozenBatchNorm2d, norm_kwargs={}, pretrained=False)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
     net.hybridize(static_alloc=True)
     net.collect_params().load(config.val.params_file)
