@@ -567,7 +567,7 @@ def main():
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [4, 6]
+    config.TRAIN.lr_step = [5]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
