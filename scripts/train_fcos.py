@@ -293,6 +293,10 @@ def train_net(config):
             except Exception as e:
                 logging.exception(e)
 
+    if config.TRAIN.resume is not None:
+        net.collect_params().load(config.TRAIN.resume)
+        logging.info("loaded resume from {}".format(config.TRAIN.resume))
+
     # Initialize parameters
     params = net.collect_params()
     from utils.initializer import KaMingUniform
@@ -312,10 +316,6 @@ def train_net(config):
     #         p.lr_mult = 2
     #         logging.info("set wd_mult of {} to {}.".format(p_name, p.wd_mult))
     #         logging.info("set lr_mult of {} to {}.".format(p_name, p.lr_mult))
-
-    if config.TRAIN.resume is not None:
-        net.collect_params().load(config.TRAIN.resume)
-        logging.info("loaded resume from {}".format(config.TRAIN.resume))
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
@@ -528,6 +528,7 @@ def main():
     load_mobula_ops()
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
+    setattr(mobula.config, "SHOW_BUILDING_COMMAND", True)
 
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
