@@ -457,9 +457,9 @@ def train_net(config):
                     num_pos_denominator_ctx = num_pos_denominator.as_in_context(data.context)
                     centerness_sum_denominator_ctx = centerness_sum_denominator.as_in_context(data.context)
                     loc_preds, cls_preds = net(data)
-                    # iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
-                    # iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator_ctx
-                    iou_loss = IoULoss()(loc_preds[:, :4].exp(), targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
+                    iou_loss = mobula.op.IoULoss(loc_preds[:, :4], targets[:, 1:5], axis=1)
+                    iou_loss = iou_loss * targets[:, 5:6] / centerness_sum_denominator_ctx
+                    # iou_loss = IoULoss()(loc_preds[:, :4].exp(), targets[:, 1:5]) * targets[:, 5] / centerness_sum_denominator_ctx
                     loss_center = mobula.op.BCELoss(loc_preds[:, 4], targets[:, 5]) * targets[:, 0] / num_pos_denominator_ctx
                     loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_preds, targets=targets[:, 6:]) / num_pos_denominator_ctx
                     loss_total = loss_center.sum() + iou_loss.sum() + loss_cls.sum()
