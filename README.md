@@ -1,19 +1,22 @@
 ### Pre-trained Models
 You can download pre-trained models from <https://drive.google.com/drive/folders/1LQnVHb5Xo6fKknUiOa1fXmGI_MCucGTC?usp=sharing>
 
-|  ModelName   | Dataset  | Backbone         |with DCN | with Sync BN | Target Size | Max Size | IM_PER_IMAGE | Number of GPUs | Epochs | mAP   |
-| --------     | :-----:  | :----:           |  :----: |      :----:  |      :----: |   :----: |       :----: |         :----: | :----: |:----: |
-| FCOS         | COCO2017 | ResNet50         | False   |     True     |     800     |   1333   |     3        |      4         |   6    | 0.352 |
-| FCOS         | COCO2017 | ResNet50         | True    |     False    |     800     |   1000   |     2        |      3         |   14   | -     |
-| RetinaNet    | COCO2017 | ResNet50         | True    |     True     |     600     |   1333   |     2        |      3         |   14   | 0.324 |
-| OpenPose     | COCO2017 | Dilated-ResNet50 | False   |     False    |     368     |   368    |     4        |      3         |   40   | 0.564 |
-| OpenPose     | COCO2017 | VGG16            | False   |     False    |     368     |   368    |     4        |      3         |   40   | 0.561 |
-| RFCN         | VOC12+07 | Dilated-ResNet101| Only 3  |     False    |     800     |   1280   |     1        |      3         |   40   | 0.825 |
-| RFCN         | VOC12+07 | Dilated-ResNet50 | Only 3  |     False    |     800     |   1280   |     1        |      3         |   40   | 0.804 |
-| FPN(MS)      | COCO2017 | SEResNext50_32x4d| True    |     False    |     800     |   1280   |     1        |      4         |   5    | 0.376 |
-| FPN(MS)      | COCO2017 | Dilated-ResNet101| True    |     False    |     800     |   1280   |     1        |      4         |   5    | 0.412 |
+|  ModelName   | Dataset  | Backbone         | mAP   | with DCN | with Sync BN | Target Size | Max Size | IM_PER_IMAGE | Number of GPUs | Epochs |
+| --------     | :-----:  | :----:           |:----: |   :----: |      :----:  |      :----: |   :----: |       :----: |         :----: | :----: |
+|FCOS No Tricks| COCO2017 | ResNet50         | 0.363 |  False   |     False    |     800     |   1333   |     4        |      4         |   6    |
+| FCOS         | COCO2017 | ResNet50         | -     |  True    |     False    |     800     |   1000   |     2        |      3         |   14   |
+| RetinaNet    | COCO2017 | ResNet50         | 0.324 |  True    |     True     |     600     |   1333   |     2        |      3         |   14   |
+| OpenPose     | COCO2017 | Dilated-ResNet50 | 0.564 |  False   |     False    |     368     |   368    |     4        |      3         |   40   |
+| OpenPose     | COCO2017 | VGG16            | 0.561 |  False   |     False    |     368     |   368    |     4        |      3         |   40   |
+| RFCN         | VOC12+07 | Dilated-ResNet101| 0.825 |  Only 3  |     False    |     800     |   1280   |     1        |      3         |   6   |
+| RFCN         | VOC12+07 | Dilated-ResNet50 | 0.804 |  Only 3  |     False    |     800     |   1280   |     1        |      3         |   6   |
+| FPN(MS)      | COCO2017 | SEResNext50_32x4d| 0.376 |  True    |     False    |     800     |   1280   |     1        |      4         |   5    |
+| FPN(MS)      | COCO2017 | Dilated-ResNet101| 0.412 |  True    |     False    |     800     |   1280   |     1        |      4         |   5    |
 
 Notes:<br>
+FCOS No Tricks means the setting is same as original paper, i.e., centerness is on cls branch, GN is added, use P5 instead of C5,
+and other setting like norm_on_bbox, centerness_on_reg, center_sampling is set to False. The mAP reported by the original paper is 0.371.
+
 RFCN trained on VOC is reported as mAP@IoU=0.5 according to VOC Metric, and it is slightly different from mAP @IoU=0.5 of COCO.
 
 MS means the model is using multi-scaling when training.
