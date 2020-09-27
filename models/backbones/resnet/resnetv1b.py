@@ -4,23 +4,15 @@ from ._resnetv1b import resnet50_v1b, resnet101_v1b, resnet152_v1b
 
 
 class ResNetV1B(mx.gluon.nn.HybridBlock):
-    def __init__(self, neck, num_layers=50, sync_bn=False, num_devices=None,
-                 pretrained=True, use_global_stats=True):
+    def __init__(self, neck, num_layers=50, **feat_kwargs):
         super(ResNetV1B, self).__init__(prefix="resnetv1")
-        self.eps = 1e-5
-        feat_kwargs = {}
-        if sync_bn is True:
-            assert num_devices is not None, "num_devices is not given while sync_bn is set."
-            assert isinstance(num_devices, int)
-            feat_kwargs["norm_layer"] = mx.gluon.contrib.nn.SyncBatchNorm
-            feat_kwargs["norm_kwargs"] = {"num_devices": num_devices}
         assert num_layers in (50, 101, 152)
         if num_layers == 50:
-            feat = resnet50_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
+            feat = resnet50_v1b(**feat_kwargs)
         elif num_layers == 101:
-            feat = resnet101_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
+            feat = resnet101_v1b(**feat_kwargs)
         elif num_layers == 152:
-            feat = resnet152_v1b(pretrained=pretrained, use_global_stats=use_global_stats, **feat_kwargs)
+            feat = resnet152_v1b(**feat_kwargs)
         else:
             raise ValueError("num_layers is not supported, you can implement it by yourselves.")
         self.feat = feat

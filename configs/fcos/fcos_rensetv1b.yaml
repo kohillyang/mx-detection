@@ -1,0 +1,9 @@
+---
+network:
+  BACKBONE:
+    name: "resnetv1b"
+    kwargs:
+      num_layers: 50
+  FIXED_PARAMS:
+    - ".*layers1.*"
+    - ".*resnetv1b_conv0.*"

@@ -3,7 +3,7 @@ import logging
 import os
 import pprint
 import time
-
+import yaml
 import cv2
 import easydict
 import gluoncv
@@ -16,10 +16,7 @@ import tqdm
 
 from data.bbox.bbox_dataset import AspectGroupingDataset
 from utils.common import log_init
-from models.backbones.resnet import ResNetV1
-# from models.backbones.resnet import ResNetV1B
-# from models.backbones.dcn_resnet.resnet import ResNetV1B
-
+from models.backbones.builder import build_backbone
 
 class IoULoss(mx.gluon.nn.Block):
     def __init__(self):
@@ -275,7 +272,7 @@ def train_net(config):
     ctx_list = [mx.gpu(x) for x in config.gpus]
     from utils.blocks import FrozenBatchNorm2d
     neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = ResNetV1(neck=neck, norm_layer=FrozenBatchNorm2d, norm_kwargs={}, pretrained=True)
+    backbone = build_backbone(config, neck=neck, norm_layer=FrozenBatchNorm2d, **config.network.BACKBONE.kwargs)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
 
     # Resume parameters.
@@ -508,6 +505,8 @@ def parse_args():
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1,2,3")
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
+    parser.add_argument('--config', help='path of the config.', required=False, type=str, default="configs/fcos/fcos_rensetv1b.yaml")
+
     parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
                         required=False, type=int, default=3)
     parser.add_argument('--extra-flag', help='Extra flag when saving model.', required=False, type=str, default="")
@@ -576,6 +575,12 @@ def main():
     if config.TRAIN.USE_FP16:
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
+    config.network.BACKBONE = easydict.EasyDict()
+    config.network.BACKBONE.name = "resnetv1b"
+    config.network.BACKBONE.kwargs = easydict.EasyDict()
+    config.network.BACKBONE.kwargs.num_layers = 50
+    config.network.BACKBONE.kwargs.pretrained = True
+
     config.network.FIXED_PARAMS = [".*stage1.*",
                                    ".*resnetv10_conv0.*"]
     config.network.use_global_stats = True
@@ -592,6 +597,20 @@ def main():
         config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
 
     config.val = easydict.EasyDict()
+    if os.path.exists(args.config):
+        with open(args.config) as f:
+            config_loaded = yaml.load(f, yaml.CLoader)
+
+            def update_config(c, v):
+                for k in v.keys():
+                    if isinstance(v[k], dict):
+                        update_config(c[k], v[k])
+                    else:
+                        c[k] = v[k]
+            update_config(config, config_loaded)
+    else:
+        logging.info("Escape loading config since it is not exist.")
+
     if args.demo:
         config.val.params_file = args.demo_params
         config.val.viz = args.viz
@@ -657,7 +676,7 @@ def demo_net(config):
     import tqdm
     ctx_list = [mx.gpu(x) for x in config.gpus]
     neck = PyramidNeckFCOS(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = ResNetV1(neck=neck, norm_layer=FrozenBatchNorm2d, norm_kwargs={}, pretrained=False)
+    backbone = build_backbone(config, neck=neck, norm_layer=FrozenBatchNorm2d, **config.network.BACKBONE.kwargs)
     net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES)
     net.hybridize(static_alloc=True)
     net.collect_params().load(config.val.params_file)
