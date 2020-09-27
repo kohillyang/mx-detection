@@ -3,7 +3,7 @@ You can download pre-trained models from <https://drive.google.com/drive/folders
 
 |  ModelName   | Dataset  | Backbone         | mAP   | with DCN | with Sync BN | Target Size | Max Size | IM_PER_IMAGE | Number of GPUs | Epochs |
 | --------     | :-----:  | :----:           |:----: |   :----: |      :----:  |      :----: |   :----: |       :----: |         :----: | :----: |
-|FCOS No Tricks| COCO2017 | ResNet50         | 0.363 |  False   |     False    |     800     |   1333   |     4        |      4         |   6    |
+|FCOS No Tricks| COCO2017 | ResNet50         | 0.367 |  False   |     False    |     800     |   1333   |     4        |      4         |   6    |
 | FCOS         | COCO2017 | ResNet50         | -     |  True    |     False    |     800     |   1000   |     2        |      3         |   14   |
 | RetinaNet    | COCO2017 | ResNet50         | 0.324 |  True    |     True     |     600     |   1333   |     2        |      3         |   14   |
 | OpenPose     | COCO2017 | Dilated-ResNet50 | 0.564 |  False   |     False    |     368     |   368    |     4        |      3         |   40   |
