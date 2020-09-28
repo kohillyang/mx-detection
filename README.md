@@ -16,6 +16,7 @@ You can download pre-trained models from <https://drive.google.com/drive/folders
 Notes:<br>
 FCOS No Tricks means the setting is same as original paper, i.e., centerness is on cls branch, GN is added, use P5 instead of C5,
 and other setting like norm_on_bbox, centerness_on_reg, center_sampling is set to False. The mAP reported by the original paper is 0.371.
+For more information about FCOS, please see [fcos.md](docs/fcos.md)
 
 RFCN trained on VOC is reported as mAP@IoU=0.5 according to VOC Metric, and it is slightly different from mAP @IoU=0.5 of COCO.
 
