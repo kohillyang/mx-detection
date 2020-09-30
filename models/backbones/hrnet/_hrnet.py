@@ -108,7 +108,7 @@ class BasicBlock(mx.gluon.HybridBlock):
         if self.downsample is not None:
             residual = self.downsample(x)
 
-        out += residual
+        out = out + residual
         out = self.relu(out)
 
         return out
@@ -149,7 +149,7 @@ class Bottleneck(mx.gluon.HybridBlock):
         if self.downsample is not None:
             residual = self.downsample(x)
 
-        out += residual
+        out = out + residual
         out = self.relu(out)
 
         return out
@@ -584,6 +584,7 @@ if __name__ == '__main__':
     update_config(cfg, args)
     model = get_cls_net(cfg)
     model.initialize()
+    model.hybridize()
     x = mx.nd.random.randn(1, 3, 512, 512)
     y = model(x)
     print(y.shape)
