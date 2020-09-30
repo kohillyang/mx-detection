@@ -576,7 +576,7 @@ def main():
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.BACKBONE = easydict.EasyDict()
-    config.network.BACKBONE.name = "resnetv1b"
+    config.network.BACKBONE.name = "resnetv1"
     config.network.BACKBONE.kwargs = easydict.EasyDict()
     config.network.BACKBONE.kwargs.num_layers = 50
     config.network.BACKBONE.kwargs.pretrained = True
@@ -609,7 +609,7 @@ def main():
                         c[k] = v[k]
             update_config(config, config_loaded)
     else:
-        logging.info("Escape loading config since it is not exist.")
+        logging.info("Escape loading config since it does not exist.")
 
     if args.demo:
         config.val.params_file = args.demo_params

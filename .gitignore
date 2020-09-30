@@ -48,3 +48,5 @@ utils/operator_cxx/RetinaNetTargetGenerator/mobula_op.hash.cache
 utils/operator_cxx/PAAScore/build
 utils/operator_cxx/PAAScore/mobula_op.hash.cache
 *.cache
+
+pretrained-models/
