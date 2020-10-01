@@ -1,4 +1,4 @@
-### classification on ImageNet
+### Classification on ImageNet
 The model is copied from <https://github.com/HRNet/HRNet-Image-Classification> with the following two modifications:
 
 ```bash

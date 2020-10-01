@@ -33,6 +33,5 @@ Greatly thanks to <https://github.com/wkcn/MobulaOP> by @wkcn.
 If you have any question or suggestion, please feel free to send me a mail or create an issue.
 
 ### Todo List:
-- [ ] Find the reason why FCOS map is lower than the official implementation.
 - [ ] Train OpenPose with [HRNet](https://github.com/HRNet/HRNet-Semantic-Segmentation)
 - [ ] [PolarMask](https://arxiv.org/1909.13226) 
