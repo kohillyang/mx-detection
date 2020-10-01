@@ -17,8 +17,8 @@ you need to :<br>
 `1.` follow <https://github.com/pytorch/examples/tree/master/imagenet> and <https://raw.githubusercontent.com/soumith/imagenetloader.torch/master/valprep.sh>
 to prepare the imagenet validation dataset with 50k images. <br>
 `2.` Download pytorch params from <https://github.com/HRNet/HRNet-Image-Classification>. <br>
-`3.` Change the dataset path, config path, and params path in script <models/backbones/hrnet/cls_hrnet_mx.py>. <br>
-After these things are done, you can run `python models/backbones/hrnet/cls_hrnet_mx.py` directly, and you will see the Top1 acc result.
+`3.` Change the dataset path, config path, and params path in script [models/backbones/hrnet/cls_hrnet_mx.py](models/backbones/hrnet/cls_hrnet_mx.py). <br>
+After having done these things, you can run `python models/backbones/hrnet/cls_hrnet_mx.py` directly, and you will see the Top1 acc result.
 
 The following is my testing results:
 |  ModelName   | Top1 Acc|Dataset          | config path |
