@@ -72,9 +72,11 @@ class nn(object):
     def Upsample(scale_factor, mode):
         class _BilinearResize2D(gluon.nn.HybridBlock):
             def hybrid_forward(self, F, x, *args, **kwargs):
-                return F.contrib.BilinearResize2D(x, mode="odd_scale",
+                x = F.contrib.BilinearResize2D(x, mode="size",
                                                   scale_height=scale_factor,
                                                   scale_width=scale_factor)
+                return x
+
         return _BilinearResize2D()
 
     @staticmethod
@@ -572,19 +574,62 @@ def get_cls_net(config, **kwargs):
 
 
 if __name__ == '__main__':
+    import torchvision
     import easydict
+    import gzip
+    import pickle
+    from PIL import Image
+    import tqdm
+
     args = easydict.EasyDict()
     args.cfg = "models/backbones/hrnet/torch_hrnet_cfgs/cls/cls_hrnet_w32_sgd_lr5e-2_wd1e-4_bs32_x100.yaml"
     args.modelDir = None
     args.logDir = None
     args.dataDir = None
     args.testModel = None
+    ctx = mx.gpu(0)
     from models.backbones.hrnet.cls_hrnet_default_config import update_config, _C
     cfg = _C
     update_config(cfg, args)
     model = get_cls_net(cfg)
-    model.initialize()
-    model.hybridize()
-    x = mx.nd.random.randn(1, 3, 512, 512)
-    y = model(x)
-    print(y.shape)
+    params = model._collect_params_with_prefix()
+    params_keys = list(params.keys())
+    print("params keys from mxnet model:", params_keys)
+    import torch
+    pth_path = "pretrained-models/hrnetv2_w32_imagenet_pretrained.pth"
+    params_pth = torch.load(pth_path)
+    print("params keys from params loaded from pth file.", params_pth.keys())
+
+    for k in params.keys():
+        def map_mx_2_pth(x):
+            return x.replace(".gamma", ".weight").replace(".beta", ".bias")
+        k_pth = map_mx_2_pth(k)
+        p = params_pth[map_mx_2_pth(k)].float().numpy()
+        params[k]._load_init(mx.nd.array(p), ctx=mx.cpu())
+
+    print("loading params from {} finished without error.".format(pth_path))
+    model.collect_params().reset_ctx(ctx)
+    imagenet_val_dataset = torchvision.datasets.ImageFolder("/data1/imagenet/ILSVRC2012_img_val",
+                                                            torchvision.transforms.Compose([
+            torchvision.transforms.Resize(int(cfg.MODEL.IMAGE_SIZE[0] / 0.875)),
+            torchvision.transforms.CenterCrop(cfg.MODEL.IMAGE_SIZE[0]),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]))
+    valid_loader = torch.utils.data.DataLoader(
+        imagenet_val_dataset,
+        batch_size=16,
+        shuffle=False,
+        num_workers=16,
+        pin_memory=False
+    )
+    acc_1_metric = mx.metric.Accuracy()
+    # model.hybridize()
+    for data_batch in tqdm.tqdm(valid_loader):
+        data, label = data_batch
+        data = mx.nd.array(data.numpy(), ctx=ctx)
+        label = mx.nd.array(label.numpy(), ctx=mx.cpu())
+        y_hat = model(data)
+        acc_1_metric.update(label, y_hat)
+    print(acc_1_metric.get())
+
