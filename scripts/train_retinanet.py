@@ -17,52 +17,18 @@ import gluoncv
 
 import matplotlib.pyplot as plt
 
-from models.retinanet.resnetv1b import FPNResNetV1
 from utils.common import log_init
+from utils.blocks import FrozenBatchNorm2d
 from data.bbox.bbox_dataset import AspectGroupingDataset
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
-import data.transforms.bbox as bbox_t
 import mobula
-mobula.op.load('RetinaNetTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
-mobula.op.load('RetinaNetRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+from models.backbones.builder import build_backbone
 
 
-@mobula.op.register
-class BCELoss:
-    def forward(self, y, target):
-        return mx.nd.log(1 + mx.nd.exp(y)) - target * y
-
-    def backward(self, dy):
-        grad = mx.nd.sigmoid(self.X[0]) - self.X[1]
-        # grad *= 1e-4
-        self.dX[0][:] = grad * dy
-
-    def infer_shape(self, in_shape):
-        try:
-            assert in_shape[0] == in_shape[1]
-        except AssertionError as e:
-            print(in_shape)
-            raise e
-        return in_shape, [in_shape[0]]
-
-
-def BCEFocalLossWithoutAlpha(x, target):
-    # p = x.sigmoid()
-    # loss = target * ((1-p)**2) * mx.nd.log(p + 1e-7) + (1-target) * (p **2) * mx.nd.log(1 - p + 1e-7)
-    # return (-1 * loss).mean()
-    bce_loss = BCELoss(x, target)
-    pt = mx.nd.exp(-1 * bce_loss)
-    r = bce_loss * (1-pt) **2
-    return r
-
-
-def BCEFocalLoss(x, target, alpha=.25, gamma=2):
-    alpha = .25
-    p = x.sigmoid()
-    loss = alpha * target * ((1-p)**2) * mx.nd.log(p + 1e-11)
-    loss = loss + (1-alpha) * (1-target) * (p **2) * mx.nd.log(1 - p + 1e-11)
-    return -loss
+def load_mobula_ops():
+    mobula.op.load('RetinaNetTargetGenerator', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load('RetinaNetRegression', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load('BCELoss', os.path.join(os.path.dirname(__file__), "../utils/operator_cxx"))
+    mobula.op.load("FocalLoss")
 
 
 def batch_fn(x):
@@ -78,18 +44,18 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
             init.set_verbosity(True)
             init_bias = mx.init.Constant(-1 * np.log((1-0.01) / 0.01))
             init_bias.set_verbosity(True)
+            # The offical RetinaNet has no GroupNorm here.
             for i in range(4):
                 self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
-                self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
             num_cls_channel = (num_classes - 1) * num_anchors
             self.feat_cls.add(mx.gluon.nn.Conv2D(channels=num_cls_channel, kernel_size=1, padding=0,
                                                  bias_initializer=init_bias, weight_initializer=init))
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
+            # The offical RetinaNet has no GroupNorm here.
             for i in range(4):
                 self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
-                self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             self.feat_reg_loc = mx.gluon.nn.Conv2D(channels=4 * num_anchors, kernel_size=1, padding=0,
@@ -102,9 +68,9 @@ class RetinaNet_Head(mx.gluon.nn.HybridBlock):
         return [x_loc, x_cls]
 
 
-class FCOSFPNNet(mx.gluon.nn.HybridBlock):
+class RetinaNetFPNNet(mx.gluon.nn.HybridBlock):
     def __init__(self, backbone, num_classes, num_anchors):
-        super(FCOSFPNNet, self).__init__()
+        super(RetinaNetFPNNet, self).__init__()
         self.backbone = backbone
         self._head = RetinaNet_Head(num_classes, num_anchors)
 
@@ -117,59 +83,53 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
             return [self._head(x)]
 
 
+class PyramidNeckRetinaNet(mx.gluon.nn.HybridBlock):
+    def __init__(self, feature_dim=256):
+        super(PyramidNeckRetinaNet, self).__init__()
+        self.fpn_p7_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p7_3x3_", strides=2, padding=1)
+        self.fpn_p6_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p6_3x3_", strides=2, padding=1)
+        self.fpn_p5_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p5_3x3_", strides=1, padding=1)
+        self.fpn_p4_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p4_3x3_", strides=1, padding=1)
+        self.fpn_p3_3x3 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=3, prefix="fpn_p3_3x3_", strides=1, padding=1)
+
+        self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
+        self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
+        self.fpn_p3_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p3_1x1_")
+
+    def hybrid_forward(self, F, res2, res3, res4, res5):
+        fpn_p5_1x1 = self.fpn_p5_1x1(res5)
+        fpn_p4_1x1 = self.fpn_p4_1x1(res4)
+        fpn_p3_1x1 = self.fpn_p3_1x1(res3)
+        fpn_p5_upsample = F.contrib.BilinearResize2D(fpn_p5_1x1, scale_width=2, scale_height=2)
+        fpn_p4_plus = F.ElementWiseSum(*[fpn_p5_upsample, fpn_p4_1x1])
+        fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, scale_width=2, scale_height=2)
+        fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
+
+        P3 = self.fpn_p3_3x3(fpn_p3_plus)
+        P4 = self.fpn_p4_3x3(fpn_p4_plus)
+        P5 = self.fpn_p5_3x3(fpn_p5_1x1)
+        # The offical RetinaNet implementation uses C5 instead of P5.
+        P6 = self.fpn_p6_3x3(res5)
+        P7 = self.fpn_p7_3x3(F.relu(P6))
+
+        return P3, P4, P5, P6, P7
+
+
 class RetinaNetTargetGenerator(object):
     def __init__(self, config):
         super(RetinaNetTargetGenerator, self).__init__()
         self.config = config
-        self.strides = self.config.retinanet.network.FPN_STRIDES
-        self.base_sizes = self.config.retinanet.network.BASE_SIZES
-        self.number_of_classes = self.config.dataset.NUM_CLASSES
-        self._debug_show_fig = False
-        self.bbox_norm_coef = self.config.retinanet.network.bbox_norm_coef
 
     def __call__(self, image_transposed, bboxes):
-        h, w, c = image_transposed.shape
+        # we found that generate retinanet target using cpu in dataloader is not possible.
+        # For example, if the image size is (512, 512) and the anchor size is 9.
+        # we need to generate a Tensor with size (84 * 9 * 64 * 64), whose size is over 3MB.
+        # Instead, we move the target generating process to GPU and just pad the bbox here.
         bboxes = bboxes.copy()
-        bboxes[:, 4] += 1
-        outputs = [image_transposed]
-        if self._debug_show_fig:
-            fig, axes = plt.subplots(3, 3)
-            axes = axes.reshape(-1)
-            n_axes = 0
-        targets = []
-        num_pos = 0
-        for stride, base_size in zip(self.strides, self.base_sizes):
-            target = mobula.op.RetinaNetTargetGenerator[np.ndarray](number_of_classes=self.number_of_classes,
-                                                                    stride=stride, base_size=base_size)(
-                image_transposed.astype(np.float32), bboxes.astype(np.float32))
-            num_pos += target[:, :, :, 1].sum()
-
-            target[:, :, :, 2:6] /= np.array(self.bbox_norm_coef)[None, None, None]
-
-            if self._debug_show_fig:
-                axes[n_axes].imshow(target[:, :, :, 6:].max(axis=2).max(axis=2))
-                n_axes += 1
-            # target = np.transpose(target.reshape((target.shape[0], target.shape[1], -1)), (2, 0, 1))
-            target = target.transpose((3, 2, 0, 1))
-            target = target.reshape((target.shape[0], target.shape[1], -1))  # 6 + no. of classes, num_anchors, -1
-            targets.append(target)
-        if self._debug_show_fig:
-            axes[n_axes].imshow(image_transposed.astype(np.uint8))
-            gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[n_axes])
-            plt.show()
-        targets = np.concatenate(targets, axis=2)
-        if num_pos <= 0:
-            print("num pos is too small, ignore this sample.", num_pos)
-            # fig, axes = plt.subplots(1, 1, squeeze=False)
-            # axes = axes.reshape(-1)
-            # axes[0].imshow(image_transposed.astype(np.uint8))
-            # gluoncv.utils.viz.plot_bbox(image_transposed, bboxes=bboxes[:, :4], ax=axes[0])
-            # import time
-            # plt.savefig("{}.png".format(time.time()))
-            targets[0, :] = 0
-            targets[1, :] = 0
-        outputs.append(targets)
-        outputs = tuple(np.array(x) for x in outputs)
+        assert len(bboxes) <= self.config.dataset.max_bbox_number
+        bboxes_padded = np.ones(shape=(self.config.dataset.max_bbox_number, 5)) * -1
+        bboxes_padded[:len(bboxes), :5] = bboxes
+        outputs = [image_transposed, bboxes]
         return outputs
 
 
@@ -181,14 +141,11 @@ def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
 
-    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus), use_global_stats=config.network.use_global_stats)
-    batch_size = config.TRAIN.batch_size
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
-    from utils import graph_optimize
-    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
-    if config.network.merge_backbone_bn:
-        net = graph_optimize.merge_gluon_hybrid_block_bn(net, (1, 368, 368, 3))
+    neck = PyramidNeckRetinaNet(feature_dim=config.network.fpn_neck_feature_dim)
+    backbone = build_backbone(config, neck=neck, norm_layer=FrozenBatchNorm2d, **config.network.BACKBONE.kwargs)
+    net = RetinaNetFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
 
     # Resume parameters.
     resume = None
@@ -204,6 +161,10 @@ def train_net(config):
                 print("success load {}".format(k))
             except Exception as e:
                 logging.exception(e)
+
+    if config.TRAIN.resume is not None:
+        net.collect_params().load(config.TRAIN.resume)
+        logging.info("loaded resume from {}".format(config.TRAIN.resume))
 
     # Initialize parameters
     params = net.collect_params()
@@ -222,13 +183,9 @@ def train_net(config):
                 params[key].initialize(init=params[key].init, default_init=params[key].init)
             else:
                 params[key].initialize(default_init=default_init)
-    if config.TRAIN.resume is not None:
-        net.collect_params().load(config.TRAIN.resume)
-        logging.info("loaded resume from {}".format(config.TRAIN.resume))
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
-    from data.bbox.mscoco import COCODetection
     if config.TRAIN.aspect_grouping:
         if config.dataset.dataset_type == "coco":
             from data.bbox.mscoco import COCODetection
@@ -252,14 +209,19 @@ def train_net(config):
     params_fixed_prefix = config.network.FIXED_PARAMS
     for p in params_all.keys():
         ignore = False
+        if params_all[p].grad_req == "null" and "running" not in p:
+            ignore = True
+            logging.info("ignore {} because its grad req is set to null.".format(p))
         if params_fixed_prefix is not None:
+            import re
             for f in params_fixed_prefix:
-                if f in str(p) and "group" not in str(p):
+                if re.match(f, str(p)) is not None:
                     ignore = True
                     params_all[p].grad_req = 'null'
-                    logging.info("{} is ignored when training.".format(p))
-        if not ignore: params_to_train[p] = params_all[p]
-    lr_steps = [len(train_loader)  * int(x) for x in config.TRAIN.lr_step]
+                    logging.info("{} is ignored when training because it matches {}.".format(p, f))
+        if not ignore and params_all[p].grad_req != "null":
+            params_to_train[p] = params_all[p]
+    lr_steps = [len(train_loader) * int(x) for x in config.TRAIN.lr_step]
     logging.info(lr_steps)
     lr_scheduler = mx.lr_scheduler.MultiFactorScheduler(step=lr_steps,
                                                         warmup_mode="constant", factor=.1,
@@ -377,6 +339,8 @@ def main():
     config.dataset.NUM_CLASSES = args.num_classes
     config.dataset.dataset_type = args.dataset_type
     config.dataset.dataset_path = args.dataset_root
+    config.dataset.max_bbox_number = 200
+
     config.retinanet = easydict.EasyDict()
     config.retinanet.network = easydict.EasyDict()
     config.retinanet.network.FPN_STRIDES = [8, 16, 32, 64, 128]
@@ -410,10 +374,16 @@ def main():
     config.TRAIN.trainer_resume = None
 
     config.network = easydict.EasyDict()
-    config.network.FIXED_PARAMS = []
+    config.network.BACKBONE = easydict.EasyDict()
+    config.network.BACKBONE.name = "resnetv1"
+    config.network.BACKBONE.kwargs = easydict.EasyDict()
+    config.network.BACKBONE.kwargs.num_layers = 50
+    config.network.BACKBONE.kwargs.pretrained = True
+    config.network.FIXED_PARAMS = [".*stage1.*",
+                                   ".*resnetv10_conv0.*"]
     config.network.sync_bn = True
     config.network.use_global_stats = False if config.network.sync_bn else True
-    config.network.merge_backbone_bn = False
+    config.network.fpn_neck_feature_dim = 256
 
     config.val = easydict.EasyDict()
     if args.demo:
