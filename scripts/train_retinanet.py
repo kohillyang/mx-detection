@@ -129,7 +129,7 @@ class RetinaNetTargetGenerator(object):
         assert len(bboxes) <= self.config.dataset.max_bbox_number
         bboxes_padded = np.ones(shape=(self.config.dataset.max_bbox_number, 5)) * -1
         bboxes_padded[:len(bboxes), :5] = bboxes
-        outputs = [image_transposed, bboxes]
+        outputs = [image_transposed, bboxes_padded]
         return outputs
 
 
@@ -168,15 +168,10 @@ def train_net(config):
 
     # Initialize parameters
     params = net.collect_params()
+    from utils.initializer import KaMingUniform
     for key in params.keys():
         if params[key]._data is None:
-            if "bias" in key or "beta" in key or "offset" in key:
-                default_init = mx.init.Zero()
-            elif "gamma" in key or "var" in key:
-                default_init = mx.init.One()
-            else:
-                default_init = mx.init.Xavier()
-
+            default_init = mx.init.Zero() if "bias" in key or "offset" in key else KaMingUniform()
             default_init.set_verbosity(True)
             if params[key].init is not None and hasattr(params[key].init, "set_verbosity"):
                 params[key].init.set_verbosity(True)
@@ -201,7 +196,7 @@ def train_net(config):
         train_dataset = AspectGroupingDataset(base_train_dataset, config,
                                               target_generator=RetinaNetTargetGenerator(config))
         train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1, batchify_fn=batch_fn,
-                                                num_workers=12, last_batch="discard", shuffle=True, thread_pool=False)
+                                                num_workers=8, last_batch="discard", shuffle=True, thread_pool=False)
     else:
         assert False
     params_all = net.collect_params()
@@ -250,41 +245,74 @@ def train_net(config):
     eval_metrics = mx.metric.CompositeEvalMetric()
     for child_metric in [metric_loss_loc, metric_loss_cls]:
         eval_metrics.add(child_metric)
-    mobula.op.load("FocalLoss")
+    net.hybridize(static_alloc=True, static_shape=False)
+    for ctx in ctx_list:
+        pad = lambda x: int(np.ceil(x/32) * 32)
+        with ag.record():
+            y_hat = net(mx.nd.random.randn(config.TRAIN.batch_size // len(ctx_list),
+                                       int(pad(config.TRAIN.image_max_long_size + 64)),
+                                       int(pad(config.TRAIN.image_short_size + 64)), 3,
+                                       ctx=ctx))
+            y_hats = []
+            for x in y_hat:
+                for xx in x:
+                    y_hats.append(xx)
+            ag.backward(y_hats)
+
+        net.collect_params().zero_grad()
+    mx.nd.waitall()
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
-        net.hybridize(static_alloc=True, static_shape=False)
-        for ctx in ctx_list:
-            _ = net(mx.nd.random.randn(1, config.TRAIN.image_max_long_size, config.TRAIN.image_short_size, 3, ctx=ctx))
-            del _
+
         mx.nd.waitall()
         for nbatch, data_batch in enumerate(tqdm.tqdm(train_loader, total=len(train_loader), unit_scale=1)):
             data_list = mx.gluon.utils.split_and_load(data_batch[0][0], ctx_list=ctx_list, batch_axis=0)
-            targets_list = mx.gluon.utils.split_and_load(data_batch[0][1], ctx_list=ctx_list, batch_axis=0)
-            losses = []
+            gt_bbpxe_list = mx.gluon.utils.split_and_load(data_batch[0][1], ctx_list=ctx_list, batch_axis=0)
             losses_loc = []
             losses_cls = []
-            with ag.record():
-                for data, targets in zip(data_list, targets_list):
-                    # targets: (2, 86, num_anchors, h x w)
+            for data, gt_bboxes in zip(data_list, gt_bbpxe_list):
+                # targets: (2, 86, num_anchors, h x w)
+                with ag.record():
                     fpn_predictions = net(data)
-                    reg_fpn_predictions = [x[0].reshape(x[0].shape[0], -1, num_anchors, x[0].shape[2] * x[0].shape[3]) for x in fpn_predictions]
-                    cls_fpn_predictions = [x[1].reshape(x[1].shape[0], -1, num_anchors, x[1].shape[2] * x[1].shape[3]) for x in fpn_predictions]
-                    cls_fpn_predictions = mx.nd.concat(*cls_fpn_predictions, dim=3)
-                    reg_fpn_predictions = mx.nd.concat(*reg_fpn_predictions, dim=3)
-                    mask_for_cls = targets[:, 0:1]
-                    mask_for_reg = targets[:, 1:2]
-                    num_pos = mask_for_reg.sum()
-                    num_pos = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
-                    loss_loc = mx.nd.smooth_l1(reg_fpn_predictions - targets[:, 2:6]) * mask_for_reg / num_pos / 4
-                    loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_fpn_predictions, targets=targets[:, 6:]) * mask_for_cls / num_pos
+                # Generate targets
+                targets = []
+                for stride, base_size, (loc_pred, cls_pred) in zip(config.retinanet.network.FPN_STRIDES,
+                                                                   config.retinanet.network.BASE_SIZES,
+                                                                   fpn_predictions):
+                    op_kwargs = {"stride": stride,
+                                 "base_size": base_size,
+                                 "negative_iou_threshold": config.TRAIN.negative_iou_threshold,
+                                 "positive_iou_threshold": config.TRAIN.positive_iou_threshold,
+                                 "ratios": config.retinanet.network.RATIOS,
+                                 "scales": config.retinanet.network.SCALES,
+                                 "bbox_norm_coef": config.retinanet.network.bbox_norm_coef,
+                                 }
+                    loc_targets, cls_targets, loc_masks, cls_masks = mobula.op.RetinaNetTargetGenerator(data.detach(),
+                                                                                                        loc_pred.detach(),
+                                                                                                        cls_pred.detach(),
+                                                                                                        gt_bboxes.detach(),
+                                                                                                        **op_kwargs)
+                    targets.append([loc_targets, cls_targets, loc_masks, cls_masks])
+                num_pos = mx.nd.ElementWiseSum(*[x[2].sum() / 4 for x in targets])
+                num_pos = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
 
-                    losses.append(loss_loc)
-                    losses.append(loss_cls)
+                def smooth_l1(pred, target, beta):
+                    diff = (pred - target).abs()
+                    loss = mx.nd.where(diff < beta, 0.5 * diff * diff / beta, diff - 0.5 * beta)
+                    return loss
 
-                    losses_loc.append(loss_loc)
-                    losses_cls.append(loss_cls)
-
-            ag.backward(losses)
+                with ag.record():
+                    losses_loc_per_device = []
+                    losses_cls_per_device = []
+                    for (loc_pred, cls_pred), (loc_targets, cls_targets, loc_masks, cls_masks) in zip(fpn_predictions, targets):
+                        loss_loc = smooth_l1(loc_pred, loc_targets, beta=1.0/9) * loc_masks / num_pos
+                        loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_pred, targets=cls_targets.detach()) * cls_masks / num_pos
+                        losses_loc_per_device.append(loss_loc)
+                        losses_cls_per_device.append(loss_cls)
+                    loss_loc_sum_all_level = mx.nd.ElementWiseSum(*[x.sum() for x in losses_loc_per_device])
+                    loss_cls_sum_all_level = mx.nd.ElementWiseSum(*[x.sum() for x in losses_cls_per_device])
+                    losses_loc.append(loss_loc_sum_all_level)
+                    losses_cls.append(loss_cls_sum_all_level)
+            ag.backward(losses_loc + losses_cls)
             trainer.step(len(ctx_list))
             for l in losses_loc:
                 metric_loss_loc.update(None, l.sum())
@@ -317,6 +345,8 @@ def parse_args():
     parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
     parser.add_argument('--demo', help='demo', action="store_true")
     parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
+    parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
+                        required=False, type=int, default=2)
 
     args_known = parser.parse_known_args()[0]
     if args_known.demo:
@@ -330,9 +360,11 @@ def parse_args():
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
     os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Round"
+    load_mobula_ops()
+
     args = parse_args()
     setattr(mobula.config, "NVCC", args.nvcc)
-
+    setattr(mobula.config, "SHOW_BUILDING_COMMAND", True)
     config = easydict.EasyDict()
     config.gpus = [int(x) for x in str(args.gpus).split(',')]
     config.dataset = easydict.EasyDict()
@@ -345,30 +377,32 @@ def main():
     config.retinanet.network = easydict.EasyDict()
     config.retinanet.network.FPN_STRIDES = [8, 16, 32, 64, 128]
     config.retinanet.network.BASE_SIZES = [(32, 32), (64, 64), (128, 128), (256, 256), (512, 512)]
-    config.retinanet.network.SCALES = [2**0, 2**(1/2), 2**(2/3)]
+    config.retinanet.network.SCALES = [2**0, 2**(1/3), 2**(2/3)]
     config.retinanet.network.RATIOS = [1/2, 1, 2]
-    config.retinanet.network.bbox_norm_coef = [0.1, 0.1, 0.2, 0.2]
+    config.retinanet.network.bbox_norm_coef = [1, 1, 1, 1]
 
     config.TRAIN = easydict.EasyDict()
-    config.TRAIN.batch_size = 2 * len(config.gpus)
+    config.TRAIN.batch_size = args.im_per_gpu * len(config.gpus)
     config.TRAIN.lr = 0.01 * config.TRAIN.batch_size / 16
-    config.TRAIN.warmup_lr = config.TRAIN.lr
-    config.TRAIN.warmup_step = 1000
+    config.TRAIN.warmup_lr = config.TRAIN.lr * 1/3
+    config.TRAIN.warmup_step = int(1000 * 16 / config.TRAIN.batch_size)
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
     config.TRAIN.log_path = "output/{}/RetinaNet-hflip".format(config.dataset.dataset_type, config.TRAIN.lr)
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 600
+    config.TRAIN.image_short_size = 800
     config.TRAIN.image_max_long_size = 1333
     config.TRAIN.aspect_grouping = True
+    config.TRAIN.negative_iou_threshold = .4
+    config.TRAIN.positive_iou_threshold = .5
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
     config.TRAIN.PAD_H = 768
     config.TRAIN.PAD_W = 768
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
-    config.TRAIN.lr_step = [6, 8]
+    config.TRAIN.lr_step = [5]
     config.TRAIN.FLIP = True
     config.TRAIN.resume = None
     config.TRAIN.trainer_resume = None
@@ -399,40 +433,35 @@ def main():
 
 
 def inference_one_image(config, net, ctx, image_path):
-    path = image_path
-    ctx_list = [ctx]
-    image = cv2.imread(path)[:, :, ::-1]
+    image = cv2.imread(image_path)[:, :, ::-1]
     fscale = min(config.TRAIN.image_short_size / min(image.shape[:2]), config.TRAIN.image_max_long_size / max(image.shape[:2]))
-    image_padded = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
-    data = mx.nd.array(image_padded[np.newaxis], ctx=ctx_list[0])
+    image_resized = cv2.resize(image, (0, 0), fx=fscale, fy=fscale)
+    pad = lambda x: int(np.ceil(x/32) * 32)
+    image_padded = np.zeros(shape=(pad(image_resized.shape[0]), pad(image_resized.shape[1]), 3))
+    image_padded[:image_resized.shape[0], :image_resized.shape[1]] = image_resized
+    input_image_height, input_image_width, _ = image_padded.shape
+    data = mx.nd.array(image_padded[np.newaxis], ctx=ctx)
     fpn_predictions = net(data)
     bboxes_pred_list = []
-    num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
-    for reg_prediction, cls_prediction, base_size, stride in zip([x[0] for x in fpn_predictions],
-                                                                 [x[1] for x in fpn_predictions],
+    for (reg_prediction, cls_prediction), base_size, stride in zip(fpn_predictions,
                                                                  config.retinanet.network.BASE_SIZES,
                                                                  config.retinanet.network.FPN_STRIDES):
-        reg_prediction = reg_prediction.reshape((reg_prediction.shape[0], 4, num_anchors, reg_prediction.shape[2], reg_prediction.shape[3]))
-        cls_prediction = cls_prediction.reshape((cls_prediction.shape[0], cls_prediction.shape[1] // num_anchors, num_anchors, cls_prediction.shape[2], cls_prediction.shape[3]))
-        cls_prediction_np = cls_prediction.sigmoid().asnumpy()
-        reg_prediction_np = reg_prediction.asnumpy()
-        reg_prediction_np *= np.array(config.retinanet.network.bbox_norm_coef)[None, :, None, None, None]
-        print(1+1)
-        rois = mobula.op.RetinaNetRegression[np.ndarray](number_of_classes=config.dataset.NUM_CLASSES,
-                                                         base_size=base_size,
-                                                         cls_threshold=0,
-                                                         stride=stride
-                                                         )(data.asnumpy(), reg_prediction_np, cls_prediction_np)
-        rois = rois[0]
-        rois = rois[np.argsort(-1 * rois[:, 4])[:200]]
+        rois = mobula.op.RetinaNetRegression(data, reg_prediction, cls_prediction.sigmoid(),
+                                             base_size=base_size,
+                                             stride=stride,
+                                             ratios=config.retinanet.network.RATIOS,
+                                             scales=config.retinanet.network.SCALES,
+                                             bbox_norm_coef=config.retinanet.network.bbox_norm_coef)
+        rois = rois.reshape((-1, rois.shape[-1]))
+        topk_indices = mx.nd.topk(rois[:, 4], k=1000, ret_typ="indices")
+        rois = rois[topk_indices]
         bboxes_pred_list.append(rois)
-    bboxes_pred = np.concatenate(bboxes_pred_list, axis=0)
+    bboxes_pred = mx.nd.concat(*bboxes_pred_list, dim=0)
     if len(bboxes_pred > 0):
-        cls_dets = mx.nd.contrib.box_nms(mx.nd.array(bboxes_pred, ctx=mx.cpu()),
-                                         overlap_thresh=.5, coord_start=0, score_index=4, id_index=-1,
-                                         force_suppress=True, in_format='corner',
+        cls_dets = mx.nd.contrib.box_nms(bboxes_pred, overlap_thresh=.6, coord_start=0, score_index=4, id_index=-1,
+                                         force_suppress=False, in_format='corner',
                                          out_format='corner').asnumpy()
-        cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0.01)]
+        cls_dets = cls_dets[np.where(cls_dets[:, 4] > 0)]
         cls_dets[:, :4] /= fscale
         if config.val.viz:
             gluoncv.utils.viz.plot_bbox(image, bboxes=cls_dets[:, :4], scores=cls_dets[:, 4], labels=cls_dets[:, 5],
@@ -448,12 +477,15 @@ def demo_net(config):
     import json
     from utils.evaluate import evaluate_coco
     import tqdm
-    backbone = FPNResNetV1(sync_bn=config.network.sync_bn, num_devices=len(config.gpus), use_global_stats=config.network.use_global_stats)
+    import os
+
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
-    net = FCOSFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
+    neck = PyramidNeckRetinaNet(feature_dim=config.network.fpn_neck_feature_dim)
+    backbone = build_backbone(config, neck=neck, norm_layer=FrozenBatchNorm2d, **config.network.BACKBONE.kwargs)
+    net = RetinaNetFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
     net.collect_params().load(config.val.params_file)
-    net.collect_params().reset_ctx(ctx_list[0])
+    net.collect_params().reset_ctx(ctx_list)
     results = {}
     results["results"] = []
     for x, y, names in os.walk(os.path.join(config.dataset.dataset_path, "val2017")):
