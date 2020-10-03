@@ -575,6 +575,8 @@ def get_cls_net(config, **kwargs):
 
 if __name__ == '__main__':
     import torchvision
+    import os
+    os.environ["MXNET_USE_FUSION"]="0"
     import easydict
     import gzip
     import pickle
@@ -624,7 +626,7 @@ if __name__ == '__main__':
         pin_memory=False
     )
     acc_1_metric = mx.metric.Accuracy()
-    # model.hybridize()
+    model.hybridize()
     for data_batch in tqdm.tqdm(valid_loader):
         data, label = data_batch
         data = mx.nd.array(data.numpy(), ctx=ctx)
