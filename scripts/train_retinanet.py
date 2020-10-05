@@ -144,7 +144,7 @@ def train_net(config):
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     neck = PyramidNeckRetinaNet(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = build_backbone(config, neck=neck, norm_layer=FrozenBatchNorm2d, **config.network.BACKBONE.kwargs)
+    backbone = build_backbone(config, neck=neck, norm_layer=mx.gluon.contrib.nn.SyncBatchNorm, **config.network.BACKBONE.kwargs)
     net = RetinaNetFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
 
     # Resume parameters.
@@ -413,10 +413,9 @@ def main():
     config.network.BACKBONE.kwargs = easydict.EasyDict()
     config.network.BACKBONE.kwargs.num_layers = 50
     config.network.BACKBONE.kwargs.pretrained = True
+    config.network.BACKBONE.kwargs.norm_kwargs = {"num_devices": len(config.gpus)}
     config.network.FIXED_PARAMS = [".*stage1.*",
                                    ".*resnetv10_conv0.*"]
-    config.network.sync_bn = True
-    config.network.use_global_stats = False if config.network.sync_bn else True
     config.network.fpn_neck_feature_dim = 256
 
     config.val = easydict.EasyDict()
