@@ -258,7 +258,10 @@ def train_net(config):
                 for xx in x:
                     y_hats.append(xx)
             ag.backward(y_hats)
-
+            del x
+            del xx
+            del y_hat
+            del y_hats
         net.collect_params().zero_grad()
     mx.nd.waitall()
     for epoch in range(config.TRAIN.begin_epoch, config.TRAIN.end_epoch):
