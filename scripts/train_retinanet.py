@@ -425,7 +425,7 @@ def main():
     config.network.BACKBONE.kwargs.num_layers = 50
     config.network.BACKBONE.kwargs.pretrained = True
     config.network.BACKBONE.kwargs.norm_kwargs = {"num_devices": len(config.gpus)}
-    config.network.FIXED_PARAMS = ['.*gamma.*', '.*beta.*']
+    config.network.FIXED_PARAMS = []
     config.network.fpn_neck_feature_dim = 256
 
     config.val = easydict.EasyDict()
