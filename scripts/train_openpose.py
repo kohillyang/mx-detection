@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), "../MobulaOP"))
 import tqdm
 import time
 import easydict
@@ -19,7 +18,7 @@ from models.openpose.cpm import CPMNet, CPMVGGNet
 import data.pose.pose_transforms as transforms
 
 import mobula
-print(mobula.__path__)
+
 
 @mobula.op.register
 class BCELoss:

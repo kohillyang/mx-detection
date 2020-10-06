@@ -19,6 +19,8 @@ FCOS No Tricks means the setting is same as original paper, i.e., centerness is 
 and other setting like norm_on_bbox, centerness_on_reg, center_sampling is set to False. The mAP reported by the original paper is 0.371.
 For more information about FCOS, please see [fcos.md](docs/fcos.md)
 
+For OpenPose, please go into https://github.com/kohillyang/mx-openpose for more information.
+
 RFCN trained on VOC is reported as mAP@IoU=0.5 according to VOC Metric, and it is slightly different from mAP @IoU=0.5 of COCO.
 
 MS means the model is using multi-scaling when training.
@@ -32,6 +34,9 @@ Greatly thanks to <https://github.com/wkcn/MobulaOP> by @wkcn.
 
 If you have any question or suggestion, please feel free to send me a mail or create an issue.
 
+
 ### Todo List:
+- [ ] FCOS+Tricks(center sampling, centerness on reg head, gIoU, gFocalLoss, etc.).
+- [ ] ATSS/PAA based on FCOS.
 - [ ] Train OpenPose with [HRNet](https://github.com/HRNet/HRNet-Semantic-Segmentation)
 - [ ] [PolarMask](https://arxiv.org/1909.13226) 
