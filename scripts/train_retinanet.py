@@ -272,6 +272,7 @@ def train_net(config):
             gt_bbpxe_list = mx.gluon.utils.split_and_load(data_batch[0][1], ctx_list=ctx_list, batch_axis=0)
             losses_loc = []
             losses_cls = []
+            num_pos_list = []
             for data, gt_bboxes in zip(data_list, gt_bbpxe_list):
                 # targets: (2, 86, num_anchors, h x w)
                 with ag.record():
@@ -296,7 +297,7 @@ def train_net(config):
                                                                                                         **op_kwargs)
                     targets.append([loc_targets, cls_targets, loc_masks, cls_masks])
                 num_pos = mx.nd.ElementWiseSum(*[x[2].sum() / 4 for x in targets])
-                num_pos = mx.nd.maximum(num_pos, mx.nd.ones_like(num_pos))
+                num_pos_list.append(num_pos)
 
                 def smooth_l1(pred, target, beta):
                     diff = (pred - target).abs()
@@ -307,20 +308,28 @@ def train_net(config):
                     losses_loc_per_device = []
                     losses_cls_per_device = []
                     for (loc_pred, cls_pred), (loc_targets, cls_targets, loc_masks, cls_masks) in zip(fpn_predictions, targets):
-                        loss_loc = smooth_l1(loc_pred, loc_targets, beta=1.0/9) * loc_masks / num_pos
-                        loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_pred, targets=cls_targets.detach()) * cls_masks / num_pos
+                        loss_loc = smooth_l1(loc_pred, loc_targets, beta=1.0/9) * loc_masks
+                        loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_pred, targets=cls_targets.detach()) * cls_masks
                         losses_loc_per_device.append(loss_loc)
                         losses_cls_per_device.append(loss_cls)
                     loss_loc_sum_all_level = mx.nd.ElementWiseSum(*[x.sum() for x in losses_loc_per_device])
                     loss_cls_sum_all_level = mx.nd.ElementWiseSum(*[x.sum() for x in losses_cls_per_device])
                     losses_loc.append(loss_loc_sum_all_level)
                     losses_cls.append(loss_cls_sum_all_level)
+            num_pos_per_batch_across_all_devices = sum([x.sum().asscalar() for x in num_pos_list])
+            with ag.record():
+                for i in range(len(losses_loc)):
+                    losses_loc[i] = losses_loc[i] / num_pos_per_batch_across_all_devices
+                for i in range(len(losses_cls)):
+                    losses_cls[i] = losses_cls[i] / num_pos_per_batch_across_all_devices
+
             ag.backward(losses_loc + losses_cls)
-            trainer.step(len(ctx_list))
-            for l in losses_loc:
-                metric_loss_loc.update(None, l.sum())
-            for l in losses_cls:
-                metric_loss_cls.update(None, l.sum())
+            # Since the num_pos is the total number of positive number of a mini-batch,
+            # the normalizing coefficient should be 1 here.
+            trainer.step(1)
+            metric_loss_loc.update(None, mx.nd.array([sum([x.asscalar() for x in losses_loc])]))
+            metric_loss_cls.update(None, mx.nd.array([sum([x.asscalar() for x in losses_cls])]))
+
             if trainer.optimizer.num_update % config.TRAIN.log_interval == 0:
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
