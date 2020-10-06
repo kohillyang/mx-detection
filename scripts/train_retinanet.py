@@ -483,7 +483,7 @@ def demo_net(config):
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     neck = PyramidNeckRetinaNet(feature_dim=config.network.fpn_neck_feature_dim)
-    backbone = build_backbone(config, neck=neck, norm_layer=FrozenBatchNorm2d, **config.network.BACKBONE.kwargs)
+    backbone = build_backbone(config, neck=neck, norm_layer=mx.gluon.contrib.nn.SyncBatchNorm, **config.network.BACKBONE.kwargs)
     net = RetinaNetFPNNet(backbone, config.dataset.NUM_CLASSES, num_anchors)
     net.collect_params().load(config.val.params_file)
     net.collect_params().reset_ctx(ctx_list)
