@@ -362,7 +362,6 @@ def parse_args():
 
 def main():
     os.environ["MXNET_CUDNN_AUTOTUNE_DEFAULT"] = "0"
-    os.environ["MXNET_GPU_MEM_POOL_TYPE"] = "Unpooled"
     load_mobula_ops()
 
     args = parse_args()
