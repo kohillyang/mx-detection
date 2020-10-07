@@ -170,27 +170,36 @@ class ResNetV1b(HybridBlock):
                 self.conv1.add(nn.Activation('relu'))
                 self.conv1.add(nn.Conv2D(channels=stem_width*2, kernel_size=3, strides=1,
                                          padding=1, use_bias=False))
-            self.bn1 = norm_layer(in_channels=64 if not deep_stem else stem_width*2,
+            if not isinstance(norm_layer, (list, tuple)):
+                import logging
+                logging.info("norm layer is not list or tuple, so assume "
+                             "batchnorm layers of the whole backbone are same.")
+                norm_layers = [norm_layer] * 5
+            else:
+                assert len(norm_layer) == 5
+                norm_layers = norm_layer
+
+            self.bn1 = norm_layers[0](in_channels=64 if not deep_stem else stem_width*2,
                                   **norm_kwargs)
             self.relu = nn.Activation('relu')
             self.maxpool = nn.MaxPool2D(pool_size=3, strides=2, padding=1)
             self.layer1 = self._make_layer(1, block, 64, layers[0], avg_down=avg_down,
-                                           norm_layer=norm_layer, last_gamma=last_gamma)
+                                           norm_layer=norm_layers[1], last_gamma=last_gamma)
             self.layer2 = self._make_layer(2, block, 128, layers[1], strides=2, avg_down=avg_down,
-                                           norm_layer=norm_layer, last_gamma=last_gamma)
+                                           norm_layer=norm_layers[2], last_gamma=last_gamma)
             if dilated:
                 self.layer3 = self._make_layer(3, block, 256, layers[2], strides=1, dilation=2,
-                                               avg_down=avg_down, norm_layer=norm_layer,
+                                               avg_down=avg_down, norm_layer=norm_layers[3],
                                                last_gamma=last_gamma)
                 self.layer4 = self._make_layer(4, block, 512, layers[3], strides=1, dilation=4,
-                                               avg_down=avg_down, norm_layer=norm_layer,
+                                               avg_down=avg_down, norm_layer=norm_layers[4],
                                                last_gamma=last_gamma)
             else:
                 self.layer3 = self._make_layer(3, block, 256, layers[2], strides=2,
-                                               avg_down=avg_down, norm_layer=norm_layer,
+                                               avg_down=avg_down, norm_layer=norm_layers[3],
                                                last_gamma=last_gamma)
                 self.layer4 = self._make_layer(4, block, 512, layers[3], strides=2,
-                                               avg_down=avg_down, norm_layer=norm_layer,
+                                               avg_down=avg_down, norm_layer=norm_layers[4],
                                                last_gamma=last_gamma)
             self.avgpool = nn.GlobalAvgPool2D()
             self.flat = nn.Flatten()
