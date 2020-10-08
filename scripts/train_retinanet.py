@@ -140,7 +140,12 @@ def batch_fn(x):
 def train_net(config):
     mx.random.seed(3)
     np.random.seed(3)
-
+    try:
+        import torch
+        torch.random.manual_seed(3)
+    except ImportError as e:
+        logging.info("setting torch seed failed.")
+        logging.exception(e)
     ctx_list = [mx.gpu(x) for x in config.gpus]
     num_anchors = len(config.retinanet.network.SCALES) * len(config.retinanet.network.RATIOS)
     neck = PyramidNeckRetinaNet(feature_dim=config.network.fpn_neck_feature_dim)
