@@ -124,6 +124,8 @@ MOBULA_KERNEL retinanet_target_gen_kernel(
 				T class_id_T = tensor_bboxes(batch_idx, gt_bbox_idx_with_max_iou, 4);
 				int class_id = static_cast<int>(class_id_T);
 
+                assert(gt_x1 - gt_x0 > 1e-3);
+                assert(gt_y1 - gt_y0 > 1e-3);
 
 				tensor_loc_targets_output(batch_idx, anchor_idx * 4 + 0, h_idx, w_idx) = (gt_x0 - anchor_x0) / (anchor_x1 - anchor_x0 + 1) / bbox_norm_coef[0];
 				tensor_loc_targets_output(batch_idx, anchor_idx * 4 + 1, h_idx, w_idx) = (gt_y0 - anchor_y0) / (anchor_y1 - anchor_y0 + 1) / bbox_norm_coef[1];
