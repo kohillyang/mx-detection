@@ -430,7 +430,7 @@ def main():
     config.network.BACKBONE.kwargs.num_layers = 50
     config.network.BACKBONE.kwargs.pretrained = True
     config.network.BACKBONE.kwargs.norm_kwargs = {"num_devices": len(config.gpus)}
-    config.network.BACKBONE.kwargs.norm_layer = [FrozenBatchNorm2d, FrozenBatchNorm2d] + [mx.gluon.contrib.nn.SyncBatchNorm] * 3
+    config.network.BACKBONE.kwargs.norm_layer = FrozenBatchNorm2d
     config.network.FIXED_PARAMS = [".*layers1.*", ".*resnetv1b_conv0.*"]
     config.network.fpn_neck_feature_dim = 256
 
