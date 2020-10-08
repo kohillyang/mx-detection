@@ -86,15 +86,15 @@ MOBULA_KERNEL retinanet_target_gen_kernel(
 			T anchor_x1 = ori_x + anchor_w / 2;
 			T anchor_y1 = ori_y + anchor_h / 2;
 
-            // clip anchors which are out of bounds.
-			anchor_x0 = max(static_cast<T>(0), anchor_x0);
-			anchor_y0 = max(static_cast<T>(0), anchor_y0);
-			anchor_x1 = max(static_cast<T>(0), anchor_x1);
-			anchor_y1 = max(static_cast<T>(0), anchor_y1);
-			anchor_x0 = min(static_cast<T>(image_w), anchor_x0);
-			anchor_y0 = min(static_cast<T>(image_h), anchor_y0);
-			anchor_x1 = min(static_cast<T>(image_w), anchor_x1);
-			anchor_y1 = min(static_cast<T>(image_h), anchor_y1);
+//            // clip anchors which are out of bounds.
+//			anchor_x0 = max(static_cast<T>(0), anchor_x0);
+//			anchor_y0 = max(static_cast<T>(0), anchor_y0);
+//			anchor_x1 = max(static_cast<T>(0), anchor_x1);
+//			anchor_y1 = max(static_cast<T>(0), anchor_y1);
+//			anchor_x0 = min(static_cast<T>(image_w), anchor_x0);
+//			anchor_y0 = min(static_cast<T>(image_h), anchor_y0);
+//			anchor_x1 = min(static_cast<T>(image_w), anchor_x1);
+//			anchor_y1 = min(static_cast<T>(image_h), anchor_y1);
             if(anchor_x0 >= anchor_x1 || anchor_y0 >= anchor_y1){
                 continue;
             }

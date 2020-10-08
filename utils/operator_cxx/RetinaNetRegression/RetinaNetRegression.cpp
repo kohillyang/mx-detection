@@ -59,9 +59,9 @@ MOBULA_KERNEL retinanet_regression_kernel(
 			T anchor_y0 = ori_y - anchor_h / 2;
 			T anchor_x1 = ori_x + anchor_w / 2;
 			T anchor_y1 = ori_y + anchor_h / 2;
-			if(anchor_x0 < 0 || anchor_y0 < 0 || anchor_x1 > image_w || anchor_y1 > image_h){
-				continue;
-			}
+//			if(anchor_x0 < 0 || anchor_y0 < 0 || anchor_x1 > image_w || anchor_y1 > image_h){
+//				continue;
+//			}
 			if(anchor_x0 >= anchor_x1 || anchor_y0 >= anchor_y1){
 				continue;
 			}

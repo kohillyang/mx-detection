@@ -304,11 +304,16 @@ def train_net(config):
                     loss = mx.nd.where(diff < beta, 0.5 * diff * diff / beta, diff - 0.5 * beta)
                     return loss
 
+                def l1_loss(pred, target):
+                    diff = (pred - target).abs()
+                    return diff
+
                 with ag.record():
                     losses_loc_per_device = []
                     losses_cls_per_device = []
                     for (loc_pred, cls_pred), (loc_targets, cls_targets, loc_masks, cls_masks) in zip(fpn_predictions, targets):
-                        loss_loc = smooth_l1(loc_pred, loc_targets, beta=1.0/9) * loc_masks
+                        # loss_loc = smooth_l1(loc_pred, loc_targets, beta=1.0/9) * loc_masks
+                        loss_loc = l1_loss(loc_pred, loc_targets) * loc_masks
                         loss_cls = mobula.op.FocalLoss(alpha=.25, gamma=2, logits=cls_pred, targets=cls_targets.detach()) * cls_masks
                         losses_loc_per_device.append(loss_loc)
                         losses_cls_per_device.append(loss_cls)
