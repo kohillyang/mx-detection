@@ -8,5 +8,5 @@ class KaMingUniform(Initializer):
         super(KaMingUniform, self).__init__()
 
     def _init_weight(self, _, arr):
-        w = torch.nn.init.kaiming_uniform_(torch.zeros(size=arr.shape), a=1).numpy()
+        w = torch.nn.init.kaiming_uniform_(torch.zeros(size=arr.shape), a=1, nonlinearity="relu").numpy()
         arr[:] = mx.nd.array(w)
