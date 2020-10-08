@@ -190,7 +190,8 @@ def train_net(config):
         if config.dataset.dataset_type == "coco":
             from data.bbox.mscoco import COCODetection
             base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                               h_flip=config.TRAIN.FLIP, transform=None)
+                                               h_flip=config.TRAIN.FLIP, transform=None,
+                                               use_crowd=False, skip_empty=True, min_object_area=1)
         elif config.dataset.dataset_type == "voc":
             from data.bbox.voc import VOCDetection
             base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
