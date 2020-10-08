@@ -52,3 +52,23 @@ class PAAScore:
         number_of_anchors = number_of_anchors_times_4 // 4
         nbatch, number_of_anchors_times_number_of_classes, feature_h, feature_w = in_shape[2]
         return in_shape, [[nbatch, 2, number_of_anchors, feature_h, feature_w]]
+    
+
+@mobula.op.register
+class FitGmm(object):
+    def __init__(self):
+        pass
+    
+    def forward(self, paa_score_topk):
+        assert self.req[0] == req.write
+        nbatch, image_h, image_w, image_c = image.shape
+        mobula.func.paa_fit_gmm()
+        
+    def backward(self, y):
+        pass    # nothing need to do
+
+    def infer_shape(self, in_shape):
+        nbatch = in_shape[0][0]
+        return in_shape, [[nbatch, 4]] # two classes, and two mean
+    
+    

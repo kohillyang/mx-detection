@@ -274,21 +274,17 @@ def train_net(config):
 
                     print(cls_pred.sigmoid().max())
                     bbox_norm_coef = mx.nd.array(config.retinanet.network.bbox_norm_coef).as_in_context(mx.cpu())
-                    paa_scores_and_gt_indices = mobula.op.PAAScore(data[0:1].as_in_context(mx.cpu()),
-                                                                   reg_pred[0:1].as_in_context(mx.cpu()),
-                                                                   cls_pred[0:1].sigmoid().as_in_context(mx.cpu()),
+                    paa_scores_and_gt_indices = mobula.op.PAAScore(data.as_in_context(mx.cpu()),
+                                                                   reg_pred.as_in_context(mx.cpu()),
+                                                                   cls_pred.sigmoid().as_in_context(mx.cpu()),
                                                                    anchors_base_wh.as_in_context(mx.cpu()),
-                                                                   gt_boxes[0:1].as_in_context(mx.cpu()),
-                                                                   gt_boxes_number[0:1].as_in_context(mx.cpu()),
+                                                                   gt_boxes.as_in_context(mx.cpu()),
+                                                                   gt_boxes_number.as_in_context(mx.cpu()),
                                                                    bbox_norm_coef,
                                                                    stride=stride)
                     paa_scores = paa_scores_and_gt_indices[:, 0]
-                    try:
-                        topk_scores = paa_scores[0].reshape(-1)[mx.nd.topk(paa_scores[0].reshape(-1), ret_typ="indices", k=25)].asnumpy()
-                        topk_scores_list.append(topk_scores)
-                    except Exception:
-                        pass
-
+                    topk_values, topk_indices = mx.nd.topk(paa_scores.reshape((paa_scores.shape[0], -1)), ret_typ="both", k=25)
+                    topk_scores_list.append(topk_values[0].asnumpy())
                     nlayer += 1
             topk_scores = np.concatenate(topk_scores_list, axis=0)
             topk_scores = topk_scores[np.where(topk_scores > 0)]

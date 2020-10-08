@@ -215,7 +215,7 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         if isinstance(x, list) or isinstance(x, tuple):
             outputs = [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
         else:
-            outputs = [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
+            assert False
         loc_outputs = [x[0] for x in outputs]
         loc_outputs = [x.reshape((0, 0, -1)) for x in loc_outputs]
         loc_outputs = F.concat(*loc_outputs, dim=2)

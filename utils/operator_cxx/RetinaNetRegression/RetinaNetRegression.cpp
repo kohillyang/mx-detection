@@ -16,18 +16,23 @@ template <typename T>
 MOBULA_FUNC void retinanet_regression(
 		const int image_h,
 		const int image_w,
-		const int n_batch, const int feature_h,
+		const int n_batch,
+		const int feature_h,
 		const int feature_w,
+		const int topk,
 		const int number_of_classes,
 		T* pointer_reg_preds,
-		T* pointer_cls_preds ,
+		T* pointer_cls_preds,
+		T* pointer_topk_indices,
 		const int stride,
 		const T* anchors_base_wh,
 		const int anchors_base_wh_size,
-		const T cls_threshold, T* output) {
+		T* output) {
 	int n_bbox=0;
 	Tensor5D<T> tensor_cls_preds = Tensor5D<T>(pointer_cls_preds, n_batch, number_of_classes, anchors_base_wh_size, feature_h, feature_w);
 	Tensor5D<T> tensor_reg_preds = Tensor5D<T>(pointer_reg_preds, n_batch,  4,  anchors_base_wh_size, feature_h, feature_w);
+	Tensor5D<T> tensor_topk_indices = Tensor5D<T>(pointer_topk_indices, n_batch);
+
 	for (int n_image=0; n_image < n_batch; ++n_image){
 		int nbbox = 0;
 		T *bbox_imgae_base = output + n_image * feature_h * feature_w * anchors_base_wh_size * 6;
@@ -44,25 +49,25 @@ MOBULA_FUNC void retinanet_regression(
 	                T anchor_y0 = ori_y - anchor_h / 2;
 	                T anchor_x1 = ori_x + anchor_w / 2;
 	                T anchor_y1 = ori_y + anchor_h / 2;
-	                if(anchor_x0 < 0){
-						anchor_x0 = 0;
-						continue;
-					}
-	                if(anchor_y0 < 0){
-						anchor_y0 = 0;
-                        continue;
-	                		}
-	                if(anchor_x1 > image_w){
-	                			anchor_x1 = image_w;
-                        continue;
-					}
-	                if(anchor_y1 > image_h){
-	                			anchor_y1 = image_h;
-						continue;
-					}
-	                if(anchor_x0 >= anchor_x1 || anchor_y0 >= anchor_y1){
-	                    continue;
-	                		}
+//	                if(anchor_x0 < 0){
+//						anchor_x0 = 0;
+//						continue;
+//					}
+//	                if(anchor_y0 < 0){
+//						anchor_y0 = 0;
+//                        continue;
+//	                		}
+//	                if(anchor_x1 > image_w){
+//	                			anchor_x1 = image_w;
+//                        continue;
+//					}
+//	                if(anchor_y1 > image_h){
+//	                			anchor_y1 = image_h;
+//						continue;
+//					}
+//	                if(anchor_x0 >= anchor_x1 || anchor_y0 >= anchor_y1){
+//	                    continue;
+//	                		}
 	                T net_pred_0 = tensor_reg_preds(0, 0, anchor_idx, f_h, f_w);
 	                T net_pred_1 = tensor_reg_preds(0, 1, anchor_idx, f_h, f_w);
 	                T net_pred_2 = tensor_reg_preds(0, 2, anchor_idx, f_h, f_w);
