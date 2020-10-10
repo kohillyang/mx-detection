@@ -410,12 +410,11 @@ def main():
     config.TRAIN.warmup_step = int(1000 * 16 / config.TRAIN.batch_size)
     config.TRAIN.wd = 1e-4
     config.TRAIN.momentum = .9
-    config.TRAIN.log_path = "output/{}/RetinaNet-hflip".format(config.dataset.dataset_type, config.TRAIN.lr)
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1333
+    config.TRAIN.image_short_size = 500
+    config.TRAIN.image_max_long_size = 833
     config.TRAIN.aspect_grouping = True
     config.TRAIN.negative_iou_threshold = .4
     config.TRAIN.positive_iou_threshold = .5
@@ -439,6 +438,10 @@ def main():
     config.network.BACKBONE.kwargs.norm_layer = FrozenBatchNorm2d
     config.network.FIXED_PARAMS = [".*layers1.*", ".*resnetv1b_conv0.*"]
     config.network.fpn_neck_feature_dim = 256
+    config.TRAIN.log_path = "output/{}/RetinaNet-hflip-{}-{}".format(config.dataset.dataset_type,
+                                                                     config.TRAIN.lr,
+                                                                     config.TRAIN.image_short_size,
+                                                                     config.TRAIN.image_max_long_size)
 
     config.val = easydict.EasyDict()
     if args.demo:
