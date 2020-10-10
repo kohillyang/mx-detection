@@ -413,8 +413,8 @@ def main():
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 500
-    config.TRAIN.image_max_long_size = 833
+    config.TRAIN.image_short_size = 800
+    config.TRAIN.image_max_long_size = 1333
     config.TRAIN.aspect_grouping = True
     config.TRAIN.negative_iou_threshold = .4
     config.TRAIN.positive_iou_threshold = .5
