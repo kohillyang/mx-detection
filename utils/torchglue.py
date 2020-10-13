@@ -13,6 +13,51 @@ class NoneHybridBlock(mx.gluon.nn.HybridBlock):
         raise Exception("unimplemented.")
 
 
+class HybridSequential(mx.gluon.nn.HybridBlock):
+    """Stacks HybridBlocks sequentially.
+
+    Example::
+
+        net = nn.HybridSequential()
+        net.add(nn.Dense(10, activation='relu'))
+        net.add(nn.Dense(20))
+        net.hybridize()
+    """
+    def __init__(self):
+        super(HybridSequential, self).__init__()
+        self._layers = []
+
+    def add(self, *blocks):
+        """Adds block on top of the stack."""
+        for block in blocks:
+            self._layers.append(block)
+            self.register_child(block)
+
+    def hybrid_forward(self, F, x):
+        for block in self._children.values():
+            x = block()(x)
+        return x
+
+    def __repr__(self):
+        s = '{name}(\n{modstr}\n)'
+        modstr = '\n'.join(['  ({key}): {block}'.format(key=key,
+                                                        block=_indent(block().__repr__(), 2))
+                            for key, block in self._children.items()])
+        return s.format(name=self.__class__.__name__, modstr=modstr)
+
+    def __getitem__(self, key):
+        layers = list(self._children.values())[key]
+        if isinstance(layers, list):
+            net = type(self)()
+            net.add(*(l() for l in layers))
+            return net
+        else:
+            return layers()
+
+    def __len__(self):
+        return len(self._children)
+
+
 class nn(object):
     @staticmethod
     def BatchNorm2d(in_planes, momentum):
@@ -31,14 +76,14 @@ class nn(object):
                                strides=stride, padding=padding, dilation=dilation, groups=groups, use_bias=bias)
     @staticmethod
     def Sequential(*args):
-        bl = gluon.nn.HybridSequential()
+        bl = HybridSequential()
         for a in args:
             bl.add(a)
         return bl
 
     @staticmethod
     def ModuleList(args):
-        bl = gluon.nn.HybridSequential()
+        bl = HybridSequential()
         for a in args:
             bl.add(a)
         return bl

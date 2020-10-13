@@ -38,50 +38,7 @@ class NoneHybridBlock(mx.gluon.nn.HybridBlock):
         raise Exception("unimplemented.")
 
 
-class nn(object):
-    @staticmethod
-    def BatchNorm2d(in_planes, momentum):
-        return gluon.nn.BatchNorm(in_channels=in_planes, momentum=momentum)
-
-    @staticmethod
-    def ReLU(inplace):
-        return gluon.nn.Activation(activation="relu")
-
-    @staticmethod
-    def Conv2d(in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
-        assert padding_mode == "zeros"
-        return gluon.nn.Conv2D(channels=out_channels, in_channels=in_channels,  kernel_size=kernel_size,
-                               strides=stride, padding=padding, dilation=dilation, groups=groups, use_bias=bias)
-    @staticmethod
-    def Sequential(*args):
-        bl = gluon.nn.HybridSequential()
-        for a in args:
-            bl.add(a)
-        return bl
-
-    @staticmethod
-    def ModuleList(args):
-        bl = gluon.nn.HybridSequential()
-        for a in args:
-            bl.add(a)
-        return bl
-
-    @staticmethod
-    def Upsample(scale_factor, mode):
-        class _BilinearResize2D(gluon.nn.HybridBlock):
-            def hybrid_forward(self, F, x, *args, **kwargs):
-                x = F.contrib.BilinearResize2D(x, mode="size",
-                                                  scale_height=scale_factor,
-                                                  scale_width=scale_factor)
-                return x
-
-        return _BilinearResize2D()
-
-    @staticmethod
-    def Linear(in_features, out_features, bias=True):
-        return gluon.nn.Dense(units=out_features, in_units=in_features, use_bias=bias)
+from utils.torchglue import nn
 
 
 class BasicBlock(mx.gluon.HybridBlock):
@@ -576,7 +533,6 @@ def get_cls_net(config, **kwargs):
 if __name__ == '__main__':
     import torchvision
     import os
-    os.environ["MXNET_USE_FUSION"]="0"
     import easydict
     import gzip
     import pickle
@@ -610,7 +566,12 @@ if __name__ == '__main__':
         params[k]._load_init(mx.nd.array(p), ctx=mx.cpu())
 
     print("loading params from {} finished without error.".format(pth_path))
-    model.collect_params().reset_ctx(ctx)
+    try:
+        # 2.x branch
+        model.reset_ctx(ctx)
+    except Exception as e:
+        # 1.x branch
+        model.collect_params().reset_ctx(ctx)
     imagenet_val_dataset = torchvision.datasets.ImageFolder("/data1/imagenet/ILSVRC2012_img_val",
                                                             torchvision.transforms.Compose([
             torchvision.transforms.Resize(int(cfg.MODEL.IMAGE_SIZE[0] / 0.875)),
@@ -625,7 +586,20 @@ if __name__ == '__main__':
         num_workers=16,
         pin_memory=False
     )
-    acc_1_metric = mx.metric.Accuracy()
+
+    class Accuracy():
+        def __init__(self):
+            self.labels = []
+            self.preds = []
+
+        def update(self, label, pred):
+            self.labels.extend(label.asnumpy())
+            self.preds.extend(pred.argmax(axis=1).asnumpy())
+
+        def get(self):
+            return np.sum(np.array(self.labels) == np.array(self.preds)) / len(self.labels)
+
+    acc_1_metric = Accuracy()
     model.hybridize()
     for data_batch in tqdm.tqdm(valid_loader):
         data, label = data_batch
