@@ -578,7 +578,6 @@ def main():
     config.network.BACKBONE = easydict.EasyDict()
     config.network.BACKBONE.name = "resnetv1"
     config.network.BACKBONE.kwargs = easydict.EasyDict()
-    config.network.BACKBONE.kwargs.num_layers = 50
     config.network.BACKBONE.kwargs.pretrained = True
 
     config.network.FIXED_PARAMS = [".*stage1.*",
@@ -588,13 +587,6 @@ def main():
     config.network.fpn_neck_feature_dim = 256
     if config.TRAIN.USE_FP16:
         assert config.network.sync_bn is False, "Sync BatchNorm is not supported by amp."
-
-    config.TRAIN.log_path = "output/{}/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
-        "FCOS-res5-p5-{}".format(args.extra_flag),
-        "fp16" if config.TRAIN.USE_FP16 else "fp32",
-        "sync_bn" if config.network.sync_bn else "normal_bn",
-        "hvd" if config.use_hvd else "",
-        config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
 
     config.val = easydict.EasyDict()
     if os.path.exists(args.config):
@@ -610,6 +602,13 @@ def main():
             update_config(config, config_loaded)
     else:
         logging.info("Escape loading config since it does not exist.")
+
+    config.TRAIN.log_path = "output/{}/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
+        "FCOS-{}-p5-{}".format(config.network.BACKBONE.name, args.extra_flag),
+        "fp16" if config.TRAIN.USE_FP16 else "fp32",
+        "sync_bn" if config.network.sync_bn else "normal_bn",
+        "hvd" if config.use_hvd else "",
+        config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
 
     if args.demo:
         config.val.params_file = args.demo_params

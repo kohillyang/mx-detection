@@ -1,0 +1,16 @@
+---
+network:
+  BACKBONE:
+    name: "mobilenetv1"
+    kwargs:
+      multiplier: 1.0
+  FIXED_PARAMS:
+TRAIN:
+  lr: 0.0005
+  warmup_lr: 0.00005
+  batch_size : 8
+  image_short_size: 500
+  image_max_long_size: 833
+gpus:
+  - 0
+  - 1
