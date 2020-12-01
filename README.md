@@ -4,6 +4,7 @@ You can download pre-trained models from <https://drive.google.com/drive/folders
 |  ModelName   | Dataset  | Backbone         | mAP   | with DCN | with Sync BN | Target Size | Max Size | IM_PER_IMAGE | Number of GPUs | Epochs |
 | --------     | :-----:  | :----:           |:----: |   :----: |      :----:  |      :----: |   :----: |       :----: |         :----: | :----: |
 |FCOS No Tricks| COCO2017 | ResNet50         | 0.367 |  False   |     False    |     800     |   1333   |     4        |      4         |   6    |
+|FCOS No Tricks| COCO2017 | Mobilenetv1-1.0  | 0.222 |  False   |     False    |     500     |   833   |     4        |      4         |   6    |
 | FCOS         | COCO2017 | ResNet50         | -     |  True    |     False    |     800    |   1000   |     2        |      3         |   14   |
 | HRNet-cls    | -        | -                | See [HRNet](docs/hrnet.md)|  -    |     -     |     -    |   -   |     -        |      -         |   -   |
 | RetinaNet    | COCO2017 | ResNet50         | 0.325 |  False   |     False     |     500     |   833    |     2        |      3         |   6   |
