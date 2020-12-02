@@ -365,7 +365,7 @@ if __name__ == '__main__':
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
 
-            if batch_cnt % 100 == 0:
+            if batch_cnt % 1000 == 0:
                 save_path = os.path.join(config.TRAIN.model_prefix + "{}-{}.jpg".format(epoch, batch_cnt))
                 import matplotlib.pyplot as plt
                 fig, axes = plt.subplots(1, 2, squeeze=True)
