@@ -102,6 +102,54 @@ def parse_args():
     return args
 
 
+class Pose_Head(mx.gluon.nn.HybridBlock):
+    def __init__(self, number_of_parts, number_of_pafs):
+        super(Pose_Head, self).__init__()
+        with self.name_scope():
+            self.feat_cls = mx.gluon.nn.HybridSequential()
+            init = mx.init.Normal(sigma=0.01)
+            init.set_verbosity(True)
+            # init_bias = mx.init.Constant(-1 * np.log((1-0.01) / 0.01))
+            init_bias = mx.init.Constant(0)
+            init_bias.set_verbosity(True)
+            for i in range(4):
+                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
+                self.feat_cls.add(mx.gluon.nn.BatchNorm())
+                self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
+            self.feat_cls.add(mx.gluon.nn.Conv2D(channels=number_of_parts, kernel_size=3, padding=1, bias_initializer=init_bias, weight_initializer=init))
+
+            self.feat_paf = mx.gluon.nn.HybridSequential()
+            for i in range(4):
+                self.feat_paf.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
+                self.feat_paf.add(mx.gluon.nn.BatchNorm())
+                self.feat_paf.add(mx.gluon.nn.Activation(activation="relu"))
+            self.feat_paf.add(mx.gluon.nn.Conv2D(channels=number_of_pafs * 2, kernel_size=3, padding=1, weight_initializer=init))
+
+    def hybrid_forward(self, F, x):
+        feat_paf = self.feat_paf(x)
+        feat_cls = self.feat_cls(x)
+        return feat_paf, feat_cls
+
+
+class PyramidNeckP3(mx.gluon.nn.HybridBlock):
+    def __init__(self, number_of_parts, number_of_pafs, feature_dim=256):
+        super(PyramidNeckP3, self).__init__()
+        self.fpn_p5_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p5_1x1_")
+        self.fpn_p4_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p4_1x1_")
+        self.fpn_p3_1x1 = mx.gluon.nn.Conv2D(channels=feature_dim, kernel_size=1, prefix="fpn_p3_1x1_")
+        self.head = Pose_Head(number_of_parts, number_of_pafs)
+
+    def hybrid_forward(self, F, res2, res3, res4, res5):
+        fpn_p5_1x1 = self.fpn_p5_1x1(res5)
+        fpn_p4_1x1 = self.fpn_p4_1x1(res4)
+        fpn_p3_1x1 = self.fpn_p3_1x1(res3)
+        fpn_p5_upsample = F.contrib.BilinearResize2D(fpn_p5_1x1, scale_width=2, scale_height=2)
+        fpn_p4_plus = F.ElementWiseSum(*[fpn_p5_upsample, fpn_p4_1x1])
+        fpn_p4_upsample = F.contrib.BilinearResize2D(fpn_p4_plus, scale_width=2, scale_height=2)
+        fpn_p3_plus = F.ElementWiseSum(*[fpn_p4_upsample, fpn_p3_1x1])
+        return self.head(fpn_p3_plus)
+
+
 def get_coco_config():
     config = easydict.EasyDict()
     config.TRAIN = easydict.EasyDict()
@@ -121,8 +169,8 @@ def get_coco_config():
     config.TRAIN.TRANSFORM_PARAMS = easydict.EasyDict()
 
     # params for random cropping
-    config.TRAIN.TRANSFORM_PARAMS.crop_size_x = 368
-    config.TRAIN.TRANSFORM_PARAMS.crop_size_y = 368
+    config.TRAIN.TRANSFORM_PARAMS.crop_size_x = 384
+    config.TRAIN.TRANSFORM_PARAMS.crop_size_y = 384
     config.TRAIN.TRANSFORM_PARAMS.center_perterb_max = 40
 
     # params for random scale
@@ -204,6 +252,15 @@ if __name__ == '__main__':
     _ = train_dataset[0]  # Trigger mobula compiling
     if args.backbone == "vgg":
         net = CPMVGGNet()
+    elif args.backbone == "mobilenetv1_1.0":
+        from models.backbones.builder import build_backbone
+        config.network = easydict.EasyDict()
+        config.network.BACKBONE = easydict.EasyDict()
+        config.network.BACKBONE.name = "mobilenetv1"
+        neck = PyramidNeckP3(train_dataset.number_of_keypoints, train_dataset.number_of_pafs)
+        net = build_backbone(config, neck, multiplier=1.0, pretrained=True)
+        config.TRAIN.lr = 2e-6
+        config.TRAIN.warmup_lr = 2e-7
     else:
         net = CPMNet(train_dataset.number_of_keypoints, train_dataset.number_of_pafs)
 
@@ -307,6 +364,15 @@ if __name__ == '__main__':
                 msg = "Epoch={},Step={},lr={}, ".format(epoch, trainer.optimizer.num_update, trainer.learning_rate)
                 msg += ','.join(['{}={:.3f}'.format(w, v) for w, v in zip(*eval_metrics.get())])
                 logging.info(msg)
+
+            if batch_cnt % 100 == 0:
+                save_path = os.path.join(config.TRAIN.model_prefix + "{}-{}.jpg".format(epoch, batch_cnt))
+                import matplotlib.pyplot as plt
+                fig, axes = plt.subplots(1, 2, squeeze=True)
+                axes[0].imshow(heatmap_prediction[0][:-1].max(axis=0).asnumpy())
+                axes[1].imshow(pafmap_prediction[0].sum(axis=0).asnumpy())
+                plt.savefig(save_path)
+                plt.close()
 
         # calc mean loss on validate dataset for each epoch
         loss_val_heat = mx.metric.Loss("val_loss_heat")
