@@ -575,6 +575,37 @@ def get_cpm_symbol(data, number_of_parts, number_of_pafs):
                             conv5_5_CPM_L1, conv5_5_CPM_L2])
 
 
+class CPMMobileNet(mx.gluon.nn.HybridBlock):
+    def __init__(self, number_of_parts, number_of_pafs, resize=False):
+        super(CPMMobileNet, self).__init__()
+        inputs = mx.sym.var(name="mobilenet_outputs")
+        sym = get_cpm_symbol(inputs, number_of_parts, number_of_pafs)
+        from models.backbones.dilate_mobilenet._mobilenet import get_mobilenet
+        self.feat = get_mobilenet(multiplier=1.0, pretrained=True)
+        self.cpm_head = mx.gluon.SymbolBlock(sym, inputs)
+
+        self.mean = self.params.get('mean', shape=[1, 3, 1, 1],
+                                    init=mx.init.Zero(),
+                                    allow_deferred_init=False, grad_req='null')
+        self.std = self.params.get('std', shape=[1, 3, 1, 1],
+                                   init=mx.init.One(),  # mx.nd.array(),
+                                   allow_deferred_init=False, grad_req='null')
+        self.mean._load_init(mx.nd.array([[[[0.485]], [[0.456]], [[0.406]]]]), ctx=mx.cpu())
+        self.std._load_init(mx.nd.array([[[[0.229]], [[0.224]], [[0.225]]]]), ctx=mx.cpu())
+        self._resize = resize
+
+    def hybrid_forward(self, F, x, mean, std=None):
+        input = F.transpose(x, (0, 3, 1, 2))
+        x = input / 255.0
+        x = F.broadcast_sub(x, mean)
+        x = F.broadcast_div(x, std)
+        res5 = self.feat(x)
+        cpmhead = self.cpm_head(res5)
+        if self._resize:
+            return [F.contrib.BilinearResize2D(x, like=input, mode="like") for x in cpmhead]
+        else:
+            return cpmhead
+
 class CPMNet(mx.gluon.nn.HybridBlock):
     def __init__(self, number_of_parts, number_of_pafs, resize=False):
         super(CPMNet, self).__init__()

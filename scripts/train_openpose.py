@@ -14,7 +14,7 @@ from mxnet import gluon
 
 from data.pose.cocodatasets import COCOKeyPoints
 from data.pose.dataset import PafHeatMapDataSet
-from models.openpose.cpm import CPMNet, CPMVGGNet
+from models.openpose.cpm import CPMNet, CPMVGGNet, CPMMobileNet
 import data.pose.pose_transforms as transforms
 
 import mobula
@@ -253,14 +253,7 @@ if __name__ == '__main__':
     if args.backbone == "vgg":
         net = CPMVGGNet()
     elif args.backbone == "mobilenetv1_1.0":
-        from models.backbones.builder import build_backbone
-        config.network = easydict.EasyDict()
-        config.network.BACKBONE = easydict.EasyDict()
-        config.network.BACKBONE.name = "mobilenetv1"
-        neck = PyramidNeckP3(train_dataset.number_of_keypoints, train_dataset.number_of_pafs)
-        net = build_backbone(config, neck, multiplier=1.0, pretrained=True)
-        config.TRAIN.lr = 2e-6
-        config.TRAIN.warmup_lr = 2e-7
+        net = CPMMobileNet(train_dataset.number_of_keypoints, train_dataset.number_of_pafs)
     else:
         net = CPMNet(train_dataset.number_of_keypoints, train_dataset.number_of_pafs)
 
