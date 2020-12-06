@@ -159,16 +159,21 @@ class FCOS_Head(mx.gluon.nn.HybridBlock):
             init_bias = mx.init.Constant(-1 * np.log((1-0.01) / 0.01))
             init_bias.set_verbosity(True)
             for i in range(4):
-                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
-                self.feat_cls.add(mx.gluon.nn.GroupNorm(num_groups=32))
+                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init,
+                                                     groups=256))
+                self.feat_cls.add(mx.gluon.nn.BatchNorm())
                 self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
+                self.feat_cls.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=1, padding=0, weight_initializer=init))
+                self.feat_cls.add(mx.gluon.nn.BatchNorm())
+                self.feat_cls.add(mx.gluon.nn.Activation(activation="relu"))
+
             self.feat_cls_logits = mx.gluon.nn.Conv2D(channels=num_classes-1, kernel_size=3, padding=1,
                                                       bias_initializer=init_bias, weight_initializer=init)
 
             self.feat_reg = mx.gluon.nn.HybridSequential()
             for i in range(4):
                 self.feat_reg.add(mx.gluon.nn.Conv2D(channels=256, kernel_size=3, padding=1, weight_initializer=init))
-                self.feat_reg.add(mx.gluon.nn.GroupNorm(num_groups=32))
+                self.feat_reg.add(mx.gluon.nn.BatchNorm())
                 self.feat_reg.add(mx.gluon.nn.Activation(activation="relu"))
 
             # one extra channel for center-ness, four channel for location regression.
@@ -190,7 +195,9 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
     def __init__(self, backbone, num_classes):
         super(FCOSFPNNet, self).__init__()
         self.backbone = backbone
-        self.fcos_head = FCOS_Head(num_classes)
+        self.fcos_heads = mx.gluon.nn.HybridSequential()
+        for i in range(5):
+            self.fcos_heads.add(FCOS_Head(num_classes))
         with self.name_scope():
             self.scale0 = self.params.get('scale0', shape=[1, 1, 1, 1],
                                           init=mx.init.Constant(1),  # mx.nd.array(),
@@ -213,9 +220,9 @@ class FCOSFPNNet(mx.gluon.nn.HybridBlock):
         scales = [scale0, scale1, scale2, scale3, scale4]
         x = self.backbone(x)
         if isinstance(x, list) or isinstance(x, tuple):
-            outputs = [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
+            outputs = [head(xx, s) for head, xx, s in zip(self.fcos_heads, x, scales)]
         else:
-            outputs = [self.fcos_head(xx, s) for xx, s in zip(x, scales)]
+            assert False
         loc_outputs = [x[0] for x in outputs]
         loc_outputs = [x.reshape((0, 0, -1)) for x in loc_outputs]
         loc_outputs = F.concat(*loc_outputs, dim=2)
@@ -316,38 +323,29 @@ def train_net(config):
 
     net.collect_params().reset_ctx(list(set(ctx_list)))
 
-    if config.dataset.dataset_type == "coco":
-        from data.bbox.mscoco import COCODetection
-        base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
-                                           h_flip=config.TRAIN.FLIP, transform=None, use_crowd=False)
-    elif config.dataset.dataset_type == "voc":
-        from data.bbox.voc import VOCDetection
-        base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
-                                          splits=((2007, 'trainval'), (2012, 'trainval')),
-                                          preload_label=False)
-    else:
-        assert False
-    train_dataset = AspectGroupingDataset(base_train_dataset, config, target_generator=FCOSTargetGenerator(config))
-
-    if config.use_hvd:
-        class SplitDataset(object):
-            def __init__(self, da, local_size, local_rank):
-                self.da = da
-                self.local_size = local_size
-                self.locak_rank = local_rank
-
-            def __len__(self):
-                return len(self.da) // self.local_size
-
-            def __getitem__(self, idx):
-                return self.da[idx * self.local_size + self.locak_rank]
-
-        train_dataset = SplitDataset(train_dataset, local_size=hvd.local_size(), local_rank=hvd.local_rank())
-
-    train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=1,
-                                            num_workers=8, last_batch="discard", shuffle=True,
-                                            thread_pool=False, batchify_fn=batch_fn)
-
+    # if config.dataset.dataset_type == "coco":
+    #     from data.bbox.mscoco import COCODetection
+    #     base_train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
+    #                                        h_flip=config.TRAIN.FLIP, transform=None, use_crowd=False)
+    # elif config.dataset.dataset_type == "voc":
+    #     from data.bbox.voc import VOCDetection
+    #     base_train_dataset = VOCDetection(root=config.dataset.dataset_path,
+    #                                       splits=((2007, 'trainval'), (2012, 'trainval')),
+    #                                       preload_label=False)
+    # else:
+    #     assert False
+    # train_dataset = AspectGroupingDataset(base_train_dataset, config, target_generator=FCOSTargetGenerator(config))
+    import data.transforms.bbox as bbox_t
+    train_transforms = bbox_t.Compose([
+        # Flipping is implemented in dataset.
+        bbox_t.ResizePad(dst_h=config.TRAIN.PAD_H, dst_w=config.TRAIN.PAD_W),
+        FCOSTargetGenerator(config)
+    ])
+    from data.bbox.mscoco import COCODetection
+    train_dataset = COCODetection(root=config.dataset.dataset_path, splits=("instances_train2017",),
+                                  h_flip=config.TRAIN.FLIP, transform=train_transforms)
+    train_loader = mx.gluon.data.DataLoader(dataset=train_dataset, batch_size=config.TRAIN.batch_size,
+                                            num_workers=16, last_batch="discard", shuffle=True, thread_pool=False)
     params_all = net.collect_params()
     params_to_train = {}
     params_fixed_prefix = config.network.FIXED_PARAMS
@@ -413,18 +411,6 @@ def train_net(config):
         eval_metrics.add(child_metric)
 
     net.hybridize(static_alloc=True, static_shape=False)
-    for ctx in ctx_list:
-        with ag.record():
-            pad = lambda x: int(np.ceil(x/32) * 32)
-            _ = net(mx.nd.random.randn(config.TRAIN.batch_size // len(ctx_list),
-                                       int(pad(config.TRAIN.image_max_long_size + 32)),
-                                       int(pad(config.TRAIN.image_short_size + 32)), 3,
-                                       ctx=ctx))
-        ag.backward(_)
-        del _
-        net.collect_params().zero_grad()
-    mx.nd.waitall()
-
     while trainer.optimizer.num_update <= config.TRAIN.end_epoch * len(train_loader):
         epoch = trainer.optimizer.num_update // len(train_loader)
         for data_batch in tqdm.tqdm(train_loader) if not config.use_hvd or hvd.local_rank() == 0 else train_loader:
@@ -502,13 +488,13 @@ def parse_args():
     parser.add_argument('--dataset-type', help='voc or coco', required=False, type=str, default="coco")
     parser.add_argument('--num-classes', help='num-classes', required=False, type=int, default=81)
     parser.add_argument('--dataset-root', help='dataset root', required=False, type=str, default="/data1/coco")
-    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1,2,3")
+    parser.add_argument('--gpus', help='The gpus used to train the network.', required=False, type=str, default="0,1")
     parser.add_argument('--hvd', help='whether training with horovod, this is useful if you have many GPUs.', action="store_true")
-    parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.2/bin/nvcc")
-    parser.add_argument('--config', help='path of the config.', required=False, type=str, default="configs/fcos/fcos_rensetv1b.yaml")
+    parser.add_argument('--nvcc', help='', required=False, type=str, default="/usr/local/cuda-10.1/bin/nvcc")
+    parser.add_argument('--config', help='path of the config.', required=False, type=str, default="")
 
     parser.add_argument('--im-per-gpu', help='Number of images per GPU, set this to 1 if you are facing OOM.',
-                        required=False, type=int, default=3)
+                        required=False, type=int, default=8)
     parser.add_argument('--extra-flag', help='Extra flag when saving model.', required=False, type=str, default="")
 
     parser.add_argument('--demo', help='demo', action="store_true")
@@ -558,13 +544,11 @@ def main():
     config.TRAIN.log_interval = 100
     config.TRAIN.cls_focal_loss_alpha = .25
     config.TRAIN.cls_focal_loss_gamma = 2
-    config.TRAIN.image_short_size = 800
-    config.TRAIN.image_max_long_size = 1333
 
     config.TRAIN.aspect_grouping = True
     # if aspect_grouping is set to False, all images will be pad to (PAD_H, PAD_W)
-    config.TRAIN.PAD_H = 768
-    config.TRAIN.PAD_W = 768
+    config.TRAIN.PAD_H = 320
+    config.TRAIN.PAD_W = 320
     config.TRAIN.begin_epoch = 0
     config.TRAIN.end_epoch = 28
     config.TRAIN.lr_step = [5]
@@ -576,12 +560,11 @@ def main():
         os.environ["MXNET_SAFE_ACCUMULATION"] = "1"
     config.network = easydict.EasyDict()
     config.network.BACKBONE = easydict.EasyDict()
-    config.network.BACKBONE.name = "resnetv1"
+    config.network.BACKBONE.name = "mobilenetv1"
     config.network.BACKBONE.kwargs = easydict.EasyDict()
     config.network.BACKBONE.kwargs.pretrained = True
-
-    config.network.FIXED_PARAMS = [".*stage1.*",
-                                   ".*resnetv10_conv0.*"]
+    config.network.BACKBONE.kwargs.multiplier = .5
+    config.network.FIXED_PARAMS = []
     config.network.use_global_stats = True
     config.network.sync_bn = False
     config.network.fpn_neck_feature_dim = 256
@@ -604,11 +587,11 @@ def main():
         logging.info("Escape loading config since it does not exist.")
 
     config.TRAIN.log_path = "output/{}/{}-{}-{}-{}/reg_weighted_by_centerness_focal_alpha_gamma_lr_{}_{}_{}".format(
-        "FCOS-{}-p5-{}".format(config.network.BACKBONE.name, args.extra_flag),
+        "FCOS-{}-mini-{}".format(config.network.BACKBONE.name, args.extra_flag),
         "fp16" if config.TRAIN.USE_FP16 else "fp32",
         "sync_bn" if config.network.sync_bn else "normal_bn",
         "hvd" if config.use_hvd else "",
-        config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.image_short_size, config.TRAIN.image_max_long_size)
+        config.dataset.dataset_type, config.TRAIN.lr, config.TRAIN.PAD_H, config.TRAIN.PAD_W)
 
     if args.demo:
         config.val.params_file = args.demo_params
