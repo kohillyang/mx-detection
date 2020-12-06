@@ -8,6 +8,9 @@ def build_backbone(config, *args, **kwargs):
     elif config.network.BACKBONE.name == "mobilenetv1":
         from models.backbones.mobilenet import MobileNetV1
         backbone = MobileNetV1(*args, **kwargs)
+    elif config.network.BACKBONE.name == "hrnetw32":
+        from models.backbones.hrnet.hrnet import HRNetW32
+        backbone = HRNetW32(*args, **kwargs)
     else:
         raise ValueError("Backbone {} is unsupported.".format(config.network.BACKBONE.name))
     return backbone
